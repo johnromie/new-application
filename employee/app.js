@@ -757,6 +757,27 @@ function clearSavedLogin() {
   localStorage.removeItem('rememberLogin');
 }
 
+function saveActiveSession(user) {
+  if (!user) return;
+  localStorage.setItem('employeeSession', JSON.stringify({ user, savedAt: Date.now() }));
+}
+
+function loadActiveSession() {
+  try {
+    const raw = localStorage.getItem('employeeSession');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.user || !parsed.user.id) return null;
+    return parsed.user;
+  } catch (err) {
+    return null;
+  }
+}
+
+function clearActiveSession() {
+  localStorage.removeItem('employeeSession');
+}
+
 function saveProfile(payload) {
   localStorage.setItem('employeeProfile', JSON.stringify(payload));
 }
@@ -1984,6 +2005,7 @@ async function markTimeOut() {
 
 async function startEmployeeSession(user) {
   currentUser = user;
+  saveActiveSession(user);
   loginScreen.classList.add('hidden');
   appScreen.classList.remove('hidden');
 
@@ -2020,6 +2042,7 @@ function logoutEmployee() {
   appScreen.classList.add('hidden');
   loginScreen.classList.remove('hidden');
   clearSavedLogin();
+  clearActiveSession();
   closeServerModal();
   closeGpsConsentModal();
   stopGpsWatch();
@@ -2036,11 +2059,7 @@ loginForm.addEventListener('submit', async (event) => {
       method: 'POST',
       body: JSON.stringify({ role: 'employee', username, password })
     });
-    if (!rememberLogin || rememberLogin.checked) {
-      saveLogin(username, password);
-    } else {
-      clearSavedLogin();
-    }
+    saveLogin(username, password);
     if (result.user) {
       saveProfile({
         name: result.user.name,
@@ -2542,12 +2561,24 @@ tickClock();
 clearLegacyEmployeeCache();
 
 async function attemptAutoLogin() {
-  if (rememberLogin && !rememberLogin.checked) return;
-  const rememberFlag = localStorage.getItem('rememberLogin');
-  if (rememberFlag === 'false') return;
+  if (autoRestoreAttempted) return;
+  autoRestoreAttempted = true;
+
+  const activeSessionUser = loadActiveSession();
+  if (activeSessionUser) {
+    setLoginStatus('Signing you in automatically...');
+    try {
+      await startEmployeeSession(activeSessionUser);
+      setLoginStatus('');
+      return;
+    } catch (err) {
+      setLoginStatus('');
+      clearActiveSession();
+    }
+  }
+
   const savedLogin = localStorage.getItem('lastLogin');
   if (!savedLogin) return;
-  if (autoRestoreAttempted) return;
   let creds = null;
   try {
     creds = JSON.parse(savedLogin);
@@ -2566,8 +2597,7 @@ async function attemptAutoLogin() {
   } catch (err) {
     setLoginStatus('');
     const profile = loadProfile();
-    if (!autoRestoreAttempted && profile && (profile.email || profile.username)) {
-      autoRestoreAttempted = true;
+    if (profile && (profile.email || profile.username)) {
       try {
         const restore = await api('/api/register', {
           method: 'POST',
