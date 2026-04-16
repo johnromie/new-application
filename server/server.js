@@ -95,6 +95,9 @@ const DB_BACKUP_MIN_INTERVAL_MS = Math.max(0, Number(process.env.DB_BACKUP_MIN_I
 const IS_PRODUCTION = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
 const DATA_PATH_INSIDE_DEPLOY_ROOT = isPathInside(ROOT, DATA_PATH);
 const DB_MIRROR_PATH_INSIDE_DEPLOY_ROOT = DB_MIRROR_PATH ? isPathInside(ROOT, DB_MIRROR_PATH) : false;
+const REQUEST_TIMEOUT_MS = Math.max(5000, Number(process.env.REQUEST_TIMEOUT_MS || 25000));
+const MAX_INFLIGHT_REQUESTS = Math.max(20, Number(process.env.MAX_INFLIGHT_REQUESTS || 200));
+const EXTERNAL_FETCH_TIMEOUT_MS = Math.max(1200, Number(process.env.EXTERNAL_FETCH_TIMEOUT_MS || 4500));
 
 const REVERSE_GEOCODE_CACHE_TTL_MS = Math.max(0, Number(process.env.REVERSE_GEOCODE_CACHE_TTL_MS || 5 * 60 * 1000));
 const REVERSE_GEOCODE_CACHE_LIMIT = Math.max(50, Number(process.env.REVERSE_GEOCODE_CACHE_LIMIT || 2000));
@@ -641,6 +644,16 @@ function sendJson(res, status, payload) {
     'Content-Length': Buffer.byteLength(body)
   });
   res.end(body);
+}
+
+async function fetchWithTimeout(resource, options = {}, timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(resource, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function setCors(res) {
@@ -2844,6 +2857,12 @@ async function handleApiPg(req, res, pathname) {
         configured: Boolean(brevoConfig),
         from: brevoConfig ? brevoConfig.fromEmail : ''
       },
+      runtime: {
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
+        maxInflightRequests: MAX_INFLIGHT_REQUESTS,
+        externalFetchTimeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
+        inflightRequests
+      },
       time: Date.now()
     });
   }
@@ -3751,10 +3770,20 @@ async function handleApi(req, res, pathname) {
         markers: `color:red|label:A|${lat},${lng}`,
         key: apiKey
       });
-      const gRes = await fetch(`https://maps.googleapis.com/maps/api/staticmap?${gParams.toString()}`);
+      const gRes = await fetchWithTimeout(
+        `https://maps.googleapis.com/maps/api/staticmap?${gParams.toString()}`,
+        {},
+        EXTERNAL_FETCH_TIMEOUT_MS
+      );
       if (!gRes.ok) {
-        res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
-        return res.end('Unable to fetch map image.');
+        const osmParams = new URLSearchParams({
+          center: `${lat},${lng}`,
+          zoom: '17',
+          size: '600x320',
+          markers: `${lat},${lng},red-pushpin`
+        });
+        res.writeHead(302, { Location: `https://staticmap.openstreetmap.de/staticmap.php?${osmParams.toString()}` });
+        return res.end();
       }
       const buffer = Buffer.from(await gRes.arrayBuffer());
       res.writeHead(200, {
@@ -3763,8 +3792,14 @@ async function handleApi(req, res, pathname) {
       });
       return res.end(buffer);
     } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-      return res.end('Map error.');
+      const osmParams = new URLSearchParams({
+        center: `${lat},${lng}`,
+        zoom: '17',
+        size: '600x320',
+        markers: `${lat},${lng},red-pushpin`
+      });
+      res.writeHead(302, { Location: `https://staticmap.openstreetmap.de/staticmap.php?${osmParams.toString()}` });
+      return res.end();
     }
   }
 
@@ -3796,6 +3831,12 @@ async function handleApi(req, res, pathname) {
         provider: 'brevo',
         configured: Boolean(brevoConfig),
         from: brevoConfig ? brevoConfig.fromEmail : ''
+      },
+      runtime: {
+        requestTimeoutMs: REQUEST_TIMEOUT_MS,
+        maxInflightRequests: MAX_INFLIGHT_REQUESTS,
+        externalFetchTimeoutMs: EXTERNAL_FETCH_TIMEOUT_MS,
+        inflightRequests
       },
       time: Date.now()
     });
@@ -4572,7 +4613,35 @@ function routeRequest(req, res) {
 
 const app = express();
 app.disable('x-powered-by');
+let inflightRequests = 0;
 app.use((req, res) => {
+  if (inflightRequests >= MAX_INFLIGHT_REQUESTS) {
+    setCors(res);
+    return sendJson(res, 503, {
+      ok: false,
+      message: 'Server is busy. Please retry in a few seconds.'
+    });
+  }
+
+  inflightRequests += 1;
+  let finished = false;
+  const release = () => {
+    if (finished) return;
+    finished = true;
+    inflightRequests = Math.max(0, inflightRequests - 1);
+  };
+
+  res.on('finish', release);
+  res.on('close', release);
+  res.setTimeout(REQUEST_TIMEOUT_MS, () => {
+    if (res.headersSent) return;
+    setCors(res);
+    sendJson(res, 503, {
+      ok: false,
+      message: 'Request timed out. Please retry.'
+    });
+  });
+
   routeRequest(req, res);
 });
 

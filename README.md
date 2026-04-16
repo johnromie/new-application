@@ -109,12 +109,17 @@ Use this setup so both web (`/admin`, `/employee`) and API (`/api/*`) run in one
    - `BREVO_FROM_NAME=SDO Marinduque Attendance`
    - `OTP_EMAIL_REQUIRED=true`
    - `ALLOW_DEV_OTP_FALLBACK=false`
+   - Optional performance tuning:
+   - `REQUEST_TIMEOUT_MS=25000`
+   - `MAX_INFLIGHT_REQUESTS=200`
+   - `EXTERNAL_FETCH_TIMEOUT_MS=4500`
 5. Ensure Node version is `18+`.
 6. Restart the Node app after saving env vars.
 
 Important:
 - Use `../persistent-data/...` (with `../`), not `./persistent-data/...`.
 - `./persistent-data` can point inside deploy files and may be reset on redeploy.
+- For higher concurrency (many simultaneous users), prefer `DB_MODE=postgres` with a managed PostgreSQL database.
 
 ### Hostinger Persistence Notes
 
