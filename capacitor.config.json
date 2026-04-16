@@ -4,7 +4,7 @@
   "webDir": "employee",
   "bundledWebRuntime": false,
   "server": {
-    "url": "https://sdo-marinduquewfhrecordingsystem.depedmarinduque.com/employee/",
+    "url": "https://wfh.depedmarinduque.com/employee/",
     "cleartext": false
   }
 }
