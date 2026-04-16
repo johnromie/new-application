@@ -121,6 +121,26 @@ Important:
 - `./persistent-data` can point inside deploy files and may be reset on redeploy.
 - For higher concurrency (many simultaneous users), prefer `DB_MODE=postgres` with a managed PostgreSQL database.
 
+## PostgreSQL Migration (Recommended for High Traffic)
+
+Use this when you already have data in JSON and want to move to PostgreSQL.
+
+1. Configure PostgreSQL env vars:
+   - `DB_MODE=postgres`
+   - `DATABASE_URL=postgres://user:pass@host:5432/dbname`
+   - or `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`
+2. (Optional) If your JSON file is not in current `DB_PATH`, set:
+   - `MIGRATE_JSON_PATH=../persistent-data/db.json`
+3. Run migration:
+   - `npm run migrate:pg`
+4. Redeploy/restart app.
+5. Verify:
+   - `/api/db-health` should show `"mode": "postgres"`
+
+Notes:
+- Migration is upsert-based and safe to rerun.
+- Keep your JSON backup file until you validate all records in PostgreSQL.
+
 ### Hostinger Persistence Notes
 
 - Server now auto-detects Hostinger-like runtime and defaults to persistent storage path.

@@ -13,7 +13,8 @@
     "cap:sync:ios": "npx cap sync ios",
     "cap:open:ios": "npx cap open ios",
     "cap:sync": "npx cap sync",
-    "android:build:debug": "cd android && gradlew.bat assembleDebug"
+    "android:build:debug": "cd android && gradlew.bat assembleDebug",
+    "migrate:pg": "node scripts/migrate-json-to-postgres.js"
   },
   "engines": {
     "node": ">=18"
