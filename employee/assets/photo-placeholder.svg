@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240">
+  <rect width="240" height="240" rx="24" fill="#eef2ff"/>
+  <g fill="none" stroke="#8aa2d4" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M70 86h26l10-14h68a18 18 0 0 1 18 18v66a18 18 0 0 1-18 18H70a18 18 0 0 1-18-18v-52"/>
+    <circle cx="140" cy="130" r="28"/>
+    <path d="M52 118v-16"/>
+  </g>
+  <text x="120" y="206" font-family="Trebuchet MS, Segoe UI, sans-serif" font-size="14" text-anchor="middle" fill="#5b6b91">
+    Tap to take a photo
+  </text>
+</svg>

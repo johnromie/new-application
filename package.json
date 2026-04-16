@@ -1,0 +1,31 @@
+{
+  "name": "new-attendance-monitoring",
+  "version": "1.0.0",
+  "description": "Attendance monitoring with employee app and office-based admin website",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "start:hostinger": "node index.js",
+    "cap:add:android": "npx cap add android",
+    "cap:sync:android": "npx cap sync android",
+    "cap:open:android": "npx cap open android",
+    "cap:add:ios": "npx cap add ios",
+    "cap:sync:ios": "npx cap sync ios",
+    "cap:open:ios": "npx cap open ios",
+    "cap:sync": "npx cap sync",
+    "android:build:debug": "cd android && gradlew.bat assembleDebug"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
+    "@capacitor/ios": "^8.2.0",
+    "express": "^4.21.2",
+    "pdfkit": "^0.15.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.2.0"
+  }
+}

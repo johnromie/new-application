@@ -1,0 +1,462 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#123f85" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="SDO Attendance" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>SDO Marinduque - Employee</title>
+  <link id="employee-manifest" rel="manifest" href="manifest.webmanifest" />
+  <link id="employee-favicon" rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png" />
+  <link id="employee-apple-touch-icon" rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <link id="employee-stylesheet" rel="stylesheet" href="styles.css" />
+  <script>
+    window.APP_BUILD = '20260416-remove-attendance-today-card-1';
+    (function applyEmployeeAssetStamp() {
+      var build = window.APP_BUILD || 'dev';
+      var stamp = build + '-' + Date.now().toString(36);
+      window.APP_ASSET_STAMP = stamp;
+      var encoded = encodeURIComponent(stamp);
+
+      var manifest = document.getElementById('employee-manifest');
+      if (manifest) manifest.href = 'manifest.webmanifest?v=' + encoded;
+
+      var icon = document.getElementById('employee-favicon');
+      if (icon) icon.href = 'assets/icon-192.png?v=' + encoded;
+
+      var appleTouchIcon = document.getElementById('employee-apple-touch-icon');
+      if (appleTouchIcon) appleTouchIcon.href = 'assets/apple-touch-icon.png?v=' + encoded;
+
+      var css = document.getElementById('employee-stylesheet');
+      if (css) css.href = 'styles.css?v=' + encoded;
+    })();
+  </script>
+</head>
+<body>
+  <div class="phone-shell">
+    <section id="employee-login" class="login-screen">
+      <img class="seal" src="assets/logo.jpg" alt="SDO Logo" />
+      <h1>SDO MARINDUQUE</h1>
+      <p>WFH ATTENDANCE RECORDING SYSTEM</p>
+      <form id="employee-login-form">
+        <label class="input-field">
+          <span>Email / ID</span>
+          <input type="text" name="username" placeholder="name@email.com or SDO-001" required />
+        </label>
+        <label class="input-field">
+          <span>Password</span>
+          <div class="password-row">
+            <input type="password" name="password" placeholder="Password" required />
+            <button type="button" class="icon-btn" data-toggle="password">👁</button>
+          </div>
+        </label>
+        <button class="primary-btn" type="submit">LOGIN</button>
+        <label class="remember-row">
+          <input type="checkbox" id="remember-login" checked />
+          <span>Remember Me</span>
+        </label>
+        <button class="link-btn" type="button" id="open-forgot">Forgot Password?</button>
+        <button class="link-btn" type="button" id="open-register">Create Account</button>
+      </form>
+      <p id="login-status" class="helper-text hidden"></p>
+      <p class="footer">© SDO Marinduque ICT Unit</p>
+    </section>
+
+    <div id="register-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="card-header">
+          <h3>Register Employee</h3>
+          <button class="icon-btn" id="close-register" aria-label="Close">&times;</button>
+        </div>
+        <form id="register-form">
+          <label class="input-field">
+            <span>Full Name</span>
+            <input type="text" name="name" required />
+          </label>
+          <label class="input-field">
+            <span>Office</span>
+            <select name="office" required>
+              <option value="" disabled selected>Select Office</option>
+              <option value="Office of the SDS">Office of the SDS</option>
+              <option value="Office of the ASDS">Office of the ASDS</option>
+              <option value="Legal Unit">Legal Unit</option>
+              <option value="ICT Unit">ICT Unit</option>
+              <option value="Administrative Unit">Administrative Unit</option>
+              <option value="Personnel Section">Personnel Section</option>
+              <option value="Supply Section">Supply Section</option>
+              <option value="Cash Section">Cash Section</option>
+              <option value="Records Section">Records Section</option>
+              <option value="Procurement Section">Procurement Section</option>
+              <option value="Curriculum Implementation Division">Curriculum Implementation Division</option>
+              <option value="School Governance and Operations Division">School Governance and Operations Division</option>
+              <optgroup label="Finance Unit">
+                <option value="Accounting Section">Accounting Section</option>
+                <option value="Budget Section">Budget Section</option>
+              </optgroup>
+            </select>
+          </label>
+          <label class="input-field">
+            <span>Employment Type</span>
+            <select name="employeeType" required>
+              <option value="" disabled selected>Select Type</option>
+              <option value="COS">COS</option>
+              <option value="JO">JO</option>
+              <option value="Regular">Regular Employee</option>
+            </select>
+          </label>
+          <label class="input-field">
+            <span>Email (Username)</span>
+            <input type="email" name="email" placeholder="name@email.com" required />
+            <small class="helper-text">Use DepEd email for Regular employees.</small>
+          </label>
+          <label class="input-field">
+            <span>Password</span>
+            <div class="password-row">
+              <input type="password" name="password" required />
+              <button type="button" class="icon-btn" data-toggle="password" aria-label="Show password">👁</button>
+            </div>
+          </label>
+          <div class="action-row">
+            <button class="primary-btn" type="submit">Register</button>
+            <button class="ghost-btn" type="button" id="cancel-register">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="forgot-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="card-header">
+          <h3>Reset Password</h3>
+          <button class="icon-btn" id="close-forgot" aria-label="Close">&times;</button>
+        </div>
+        <form id="forgot-form">
+          <label class="input-field">
+            <span>Email or Employee ID</span>
+            <input type="text" name="username" required />
+          </label>
+          <label class="input-field">
+            <span>New Password</span>
+            <div class="password-row">
+              <input type="password" name="newPassword" required />
+              <button type="button" class="icon-btn" data-toggle="password" aria-label="Show password">👁</button>
+            </div>
+          </label>
+          <div class="action-row">
+            <button class="primary-btn" type="submit">Update Password</button>
+            <button class="ghost-btn" type="button" id="cancel-forgot">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="otp-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="card-header">
+          <h3>Verify Email</h3>
+          <button class="icon-btn" id="close-otp" aria-label="Close">&times;</button>
+        </div>
+        <form id="otp-form">
+          <label class="input-field">
+            <span>OTP Code</span>
+            <input type="text" name="otp" inputmode="numeric" placeholder="6-digit code" required />
+          </label>
+          <div class="action-row">
+            <button class="primary-btn" type="submit">Verify</button>
+            <button class="ghost-btn" type="button" id="resend-otp">Resend OTP</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="concern-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="card-header">
+          <h3>Send Concern</h3>
+          <button class="icon-btn" id="close-concern" aria-label="Close">&times;</button>
+        </div>
+        <form id="concern-form">
+          <label class="input-field">
+            <span>Subject</span>
+            <input type="text" name="subject" placeholder="Attendance concern" required />
+          </label>
+          <label class="input-field">
+            <span>Message</span>
+            <textarea name="message" rows="4" placeholder="Describe your concern" required></textarea>
+          </label>
+          <div id="concern-notice" class="attendance-notice hidden" aria-live="polite"></div>
+          <div class="action-row">
+            <button class="primary-btn" type="submit">Send</button>
+            <button class="ghost-btn" type="button" id="cancel-concern">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="stat-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="card-header">
+          <h3 id="stat-modal-title">Status Details</h3>
+          <button class="icon-btn" id="close-stat-modal" aria-label="Close">&times;</button>
+        </div>
+        <p class="helper-text" id="stat-modal-subtitle"></p>
+        <div class="table-wrap">
+          <table class="data-table" id="stat-modal-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Status</th>
+                <th>AM In</th>
+                <th>PM In</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="helper-text hidden" id="stat-modal-empty">No records found.</p>
+      </div>
+    </div>
+
+    <div id="gps-consent-modal" class="modal hidden"></div>
+
+    <section id="employee-app" class="app-screen hidden">
+      <header class="topbar">
+        <div class="brand">
+          <img src="assets/logo.jpg" alt="SDO Logo" />
+          <div>
+            <strong>SDO MARINDUQUE</strong>
+            <span>WFH ATTENDANCE RECORDING SYSTEM</span>
+          </div>
+        </div>
+        <button class="icon-btn" id="open-server-settings">☰</button>
+      </header>
+
+      <main class="content">
+        <section id="emp-dashboard" class="view">
+          <div class="profile-card">
+            <img id="emp-avatar" src="assets/avatar-juan.svg" alt="Avatar" />
+            <div>
+              <h2>Welcome back, <span id="emp-name">Employee</span>!</h2>
+              <p id="emp-meta">SDO-000 · ICT Unit</p>
+            </div>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat-card green clickable" data-stat="present" role="button" tabindex="0">
+              <span>Total Days</span>
+              <strong id="stat-days">0</strong>
+            </div>
+            <div class="stat-card yellow clickable" data-stat="late" role="button" tabindex="0">
+              <span>Late Count</span>
+              <strong id="stat-late">0</strong>
+            </div>
+            <div class="stat-card red clickable" data-stat="absent" role="button" tabindex="0">
+              <span>Absent</span>
+              <strong id="stat-absent">0</strong>
+            </div>
+          </div>
+
+          <div class="time-row">
+            <span>Current Time: <strong id="emp-time">--:--</strong></span>
+            <span>Date: <strong id="emp-date">---</strong></span>
+          </div>
+
+          <div class="card help-card">
+            <div class="card-header">
+              <h3>Need Help?</h3>
+              <button class="ghost-btn" id="open-concern">Send Concern</button>
+            </div>
+            <p class="muted">Send a message to the admin about attendance or account concerns.</p>
+          </div>
+
+          <div class="card report-card">
+            <div class="card-header">
+              <h3>Individual Daily Log &amp; Accomplishment Report</h3>
+              <span class="muted small" id="report-date-label">Date: --</span>
+            </div>
+            <form id="daily-report-form">
+              <div class="report-meta-grid">
+                <div>
+                  <span class="meta-label">Name</span>
+                  <strong id="report-emp-name">--</strong>
+                </div>
+                <div>
+                  <span class="meta-label">Position</span>
+                  <strong id="report-emp-position">--</strong>
+                </div>
+                <div>
+                  <span class="meta-label">Division</span>
+                  <strong id="report-division">Office of the Schools Division Superintendent</strong>
+                </div>
+                <div>
+                  <span class="meta-label">Section</span>
+                  <strong id="report-section">--</strong>
+                </div>
+              </div>
+
+              <div class="report-table">
+                <div class="report-table-head">
+                  <div>Date and Actual Time Logs</div>
+                  <div>Actual Accomplishments</div>
+                </div>
+                <div class="report-table-body">
+                  <div class="report-log">
+                    <div id="report-log-date" class="report-log-date">--</div>
+                    <div id="report-log-times" class="report-log-times">
+                      <div>AM In: --</div>
+                      <div>AM Out: --</div>
+                      <div>PM In: --</div>
+                      <div>PM Out: --</div>
+                    </div>
+                  </div>
+                  <div class="report-accomplishments">
+                    <textarea name="summary" rows="6" placeholder="Type your accomplishments for today..." required></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <div class="report-signatures">
+                <div class="report-sign-block">
+                  <span class="meta-label">Submitted by</span>
+                  <strong id="report-submitted-name">--</strong>
+                  <span id="report-submitted-position" class="muted small">--</span>
+                </div>
+              </div>
+
+              <div id="report-notice" class="attendance-notice hidden" aria-live="polite"></div>
+              <button class="primary-btn" type="submit">Submit Report</button>
+            </form>
+          </div>
+        </section>
+
+        <section id="emp-mark" class="view hidden">
+          <div class="profile-card">
+            <img id="emp-avatar-2" src="assets/avatar-juan.svg" alt="Avatar" />
+            <div>
+              <h2 id="emp-name-2">Employee</h2>
+              <p id="emp-role">IT Officer · ICT Unit</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="photo-box hidden">
+              <img id="photo-preview" src="assets/photo-placeholder.svg" alt="Photo" />
+              <label class="ghost-btn" id="take-photo-btn" for="photo-input">Take Photo</label>
+              <input id="photo-input" type="file" accept="image/*" capture="user" />
+            </div>
+            <div class="location-box hidden">
+              <div class="place-line">
+                <strong>Place:</strong> <span id="location-name">--</span>
+              </div>
+              <div class="location-meta">
+                <span>Lat: <span id="location-lat">--</span></span>
+                <span>Lng: <span id="location-lng">--</span></span>
+                <span>Accuracy: <span id="location-accuracy">--</span></span>
+              </div>
+            </div>
+            <div class="action-row">
+              <button class="primary-btn" id="time-in" type="button">MARK TIME IN</button>
+              <button class="ghost-btn" id="time-out" type="button">MARK TIME OUT</button>
+            </div>
+            <div id="attendance-notice" class="attendance-notice hidden" aria-live="polite"></div>
+            <button class="ghost-btn full-width hidden" id="gps-refresh" type="button">GET ACCURATE LOCATION (GPS)</button>
+          </div>
+        </section>
+
+        <section id="emp-records" class="view hidden">
+          <div class="card">
+            <div class="card-header">
+              <h3>My Attendance Records</h3>
+              <input type="month" id="records-month" />
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="records-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Time In (AM)</th>
+                    <th>Status In (AM)</th>
+                    <th>Time Out (AM)</th>
+                    <th>Status Out (AM)</th>
+                    <th>Time In (PM)</th>
+                    <th>Status In (PM)</th>
+                    <th>Time Out (PM)</th>
+                    <th>Status Out (PM)</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <nav class="bottom-nav">
+        <button class="nav-btn active" data-view="emp-dashboard">
+          <img class="nav-icon" src="assets/nav-dashboard.png" alt="" />
+          <span>Dashboard</span>
+        </button>
+        <button class="nav-btn" data-view="emp-mark">
+          <img class="nav-icon" src="assets/nav-attendance.png" alt="" />
+          <span>Mark Attendance</span>
+        </button>
+        <button class="nav-btn" data-view="emp-records">
+          <img class="nav-icon" src="assets/nav-records.png" alt="" />
+          <span>My Attendance</span>
+        </button>
+      </nav>
+
+      <div id="server-modal" class="modal hidden">
+        <div class="modal-card">
+          <div class="card-header">
+            <h3>Server Settings</h3>
+            <button class="icon-btn" id="close-server-settings" aria-label="Close">&times;</button>
+          </div>
+          <label class="input-field">
+            <span>Server URL</span>
+            <input id="server-url" type="text" placeholder="http://10.0.2.2:5173" />
+          </label>
+          <label class="input-field">
+            <span>Website URL</span>
+            <input id="website-url" type="text" placeholder="https://your-domain.com/admin/" />
+          </label>
+          <div class="action-row">
+            <button class="primary-btn" id="save-server-settings">Save</button>
+            <button class="ghost-btn" id="cancel-server-settings">Cancel</button>
+          </div>
+          <div class="action-row">
+            <button class="ghost-btn" id="open-website-link" type="button">Open Website</button>
+          </div>
+          <div class="action-row">
+            <button class="danger-btn" id="logout-btn">Log Out</button>
+          </div>
+          <p class="footer">Emulator: 10.0.2.2 · Device: use your PC IP</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (function loadEmployeeScripts() {
+      var stamp = encodeURIComponent(window.APP_ASSET_STAMP || Date.now().toString(36));
+
+      function appendScript(src, onload) {
+        var script = document.createElement('script');
+        script.src = src;
+        script.defer = true;
+        if (typeof onload === 'function') script.onload = onload;
+        document.body.appendChild(script);
+      }
+
+      appendScript('config.js?v=' + stamp, function () {
+        appendScript('app.js?v=' + stamp);
+      });
+    })();
+  </script>
+</body>
+</html>

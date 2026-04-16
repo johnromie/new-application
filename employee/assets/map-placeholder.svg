@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="320" viewBox="0 0 600 320">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d5e5ff"/>
+      <stop offset="1" stop-color="#f1f6ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="320" rx="18" fill="url(#bg)"/>
+  <g fill="none" stroke="#7b96c8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M260 90c0-35 28-63 63-63s63 28 63 63c0 45-63 120-63 120S260 135 260 90z"/>
+    <circle cx="323" cy="92" r="22"/>
+  </g>
+  <text x="300" y="250" font-family="Trebuchet MS, Segoe UI, sans-serif" font-size="18" text-anchor="middle" fill="#4a67a7">
+    Map Preview
+  </text>
+</svg>

@@ -1,0 +1,465 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#123f85" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="SDO Admin" />
+  <title>SDO Marinduque - Admin</title>
+  <link rel="manifest" href="manifest.webmanifest?v=20260415-1" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <link rel="stylesheet" href="styles.css?v=20260415-1" />
+</head>
+<body>
+  <div class="app">
+    <section id="admin-login" class="login-screen">
+      <div class="login-card">
+        <img class="seal" src="assets/logo.jpg" alt="SDO Logo" />
+        <h1>SDO MARINDUQUE</h1>
+        <p class="subtitle">WFH ATTENDANCE RECORDING SYSTEM</p>
+        <form id="login-form">
+          <label class="input-field">
+            <span>Username</span>
+            <input type="text" name="username" placeholder="Enter username" required />
+          </label>
+          <label class="input-field">
+            <span>Password</span>
+            <div class="password-row">
+              <input type="password" name="password" placeholder="Enter password" required />
+              <button type="button" class="icon-btn" data-toggle="password">👁</button>
+            </div>
+          </label>
+          <button class="primary-btn" type="submit">LOGIN</button>
+          <button class="link-btn" type="button" id="open-admin-forgot">Forgot Password?</button>
+          <button class="link-btn" type="button" id="open-admin-register">Create Admin Account</button>
+        </form>
+        <p class="footer">© SDO Marinduque ICT Unit</p>
+      </div>
+    </section>
+
+    <section id="admin-app" class="admin-screen hidden">
+      <header class="topbar">
+        <div class="brand">
+          <img src="assets/logo.jpg" alt="SDO Logo" />
+          <div>
+            <strong>SDO MARINDUQUE</strong>
+            <span>WFH ATTENDANCE RECORDING SYSTEM</span>
+          </div>
+        </div>
+        <div class="top-actions">
+          <div class="action-group">
+            <button class="icon-btn" id="notif-btn" title="Notifications">
+              🔔
+              <span class="badge hidden" id="notif-count">0</span>
+            </button>
+            <div class="dropdown-panel hidden" id="notif-panel">
+              <div class="panel-header">
+                <strong>Notifications</strong>
+                <button class="ghost-btn small" id="mark-notif-read">Mark all read</button>
+              </div>
+              <div class="panel-list" id="notif-list"></div>
+              <p class="panel-empty hidden" id="notif-empty">No notifications yet.</p>
+            </div>
+          </div>
+          <div class="action-group">
+            <button class="icon-btn" id="msg-btn" title="Messages">
+              ✉️
+              <span class="badge hidden" id="msg-count">0</span>
+            </button>
+            <div class="dropdown-panel hidden" id="msg-panel">
+              <div class="panel-header">
+                <strong>Messages</strong>
+                <button class="ghost-btn small" id="mark-msg-read">Mark all read</button>
+              </div>
+              <div class="panel-list" id="msg-list"></div>
+              <p class="panel-empty hidden" id="msg-empty">No messages yet.</p>
+            </div>
+          </div>
+          <div class="action-group">
+            <button class="icon-btn" id="menu-btn" title="Menu">☰</button>
+            <div class="dropdown-panel hidden" id="menu-panel">
+              <button class="primary-btn compact" id="need-help-btn">Need Help</button>
+              <div class="help-details hidden" id="help-details">
+                <div><strong>Contact:</strong> 0912-345-6789</div>
+                <div><strong>Email:</strong> sdo.marinduque@deped.gov.ph</div>
+                <div><strong>Location:</strong> DepEd SDO Marinduque, Boac</div>
+              </div>
+              <button class="ghost-btn danger" id="logout-btn">Log out</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <nav class="tabs">
+        <button class="tab-btn active" data-view="dashboard-view">Dashboard</button>
+        <button class="tab-btn" data-view="employees-view">Employees</button>
+        <button class="tab-btn" data-view="attendance-view">Attendance</button>
+        <button class="tab-btn" data-view="reports-view">Reports</button>
+      </nav>
+
+      <main class="content">
+        <section id="dashboard-view" class="view">
+          <div class="stat-grid">
+            <div class="stat-card blue">
+              <span>Total Employees</span>
+              <strong id="stat-total">0</strong>
+            </div>
+            <div class="stat-card green clickable" data-stat="present" role="button" tabindex="0" title="View present details">
+              <span>Present Today</span>
+              <strong id="stat-present">0</strong>
+            </div>
+            <div class="stat-card red clickable" data-stat="late" role="button" tabindex="0" title="View late details">
+              <span>Late</span>
+              <strong id="stat-late">0</strong>
+            </div>
+            <div class="stat-card orange clickable" data-stat="absent" role="button" tabindex="0" title="View absent details">
+              <span>Absent</span>
+              <strong id="stat-absent">0</strong>
+            </div>
+          </div>
+
+          <div class="time-row">
+            <span>Current Time: <strong id="current-time">--:--</strong></span>
+            <span>Date: <strong id="current-date">---</strong></span>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>Attendance Today</h3>
+              <button class="ghost-btn" id="refresh-attendance">Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="attendance-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Employee Name</th>
+                    <th>Office</th>
+                    <th>Time In (AM)</th>
+                    <th>Status In (AM)</th>
+                    <th>Time Out (AM)</th>
+                    <th>Status Out (AM)</th>
+                    <th>Time In (PM)</th>
+                    <th>Status In (PM)</th>
+                    <th>Time Out (PM)</th>
+                    <th>Status Out (PM)</th>
+                    <th>Report</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="employees-view" class="view hidden">
+          <div class="card">
+            <div class="card-header">
+              <h3>Employees List</h3>
+              <button class="primary-btn" id="open-add-employee">+ Add Employee</button>
+            </div>
+            <div class="search-row">
+              <input id="employee-search" type="text" placeholder="Search Employee" />
+              <button class="ghost-btn" id="refresh-employees">Refresh</button>
+            </div>
+            <table class="data-table" id="employees-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Position</th>
+                  <th>Office</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="attendance-view" class="view hidden">
+          <div class="card">
+            <div class="card-header">
+              <h3>Attendance Records</h3>
+              <div class="filters">
+                <input type="date" id="attendance-from" />
+                <input type="date" id="attendance-to" />
+                <button class="ghost-btn" id="filter-attendance">Apply</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" id="attendance-history">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Employee</th>
+                    <th>Office</th>
+                    <th>Time In (AM)</th>
+                    <th>Status In (AM)</th>
+                    <th>Time Out (AM)</th>
+                    <th>Status Out (AM)</th>
+                    <th>Time In (PM)</th>
+                    <th>Status In (PM)</th>
+                    <th>Time Out (PM)</th>
+                    <th>Status Out (PM)</th>
+                    <th>Report</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="reports-view" class="view hidden">
+          <div class="card">
+            <div class="card-header">
+              <h3>Generate Reports</h3>
+            </div>
+            <div class="form-grid">
+              <label>
+                Select Month
+                <input type="month" id="report-month" />
+              </label>
+              <label>
+                Select Office
+                <select id="report-office">
+                  <option value="">All Offices</option>
+                  <option value="Office of the SDS">Office of the SDS</option>
+                  <option value="Office of the ASDS">Office of the ASDS</option>
+                  <option value="Legal Unit">Legal Unit</option>
+                  <option value="ICT Unit">ICT Unit</option>
+                  <option value="Administrative Unit">Administrative Unit</option>
+                  <option value="Personnel Section">Personnel Section</option>
+                  <option value="Supply Section">Supply Section</option>
+                  <option value="Cash Section">Cash Section</option>
+                  <option value="Records Section">Records Section</option>
+                  <option value="Procurement Section">Procurement Section</option>
+                  <option value="Curriculum Implementation Division">Curriculum Implementation Division</option>
+                  <option value="School Governance and Operations Division">School Governance and Operations Division</option>
+                  <optgroup label="Finance Unit">
+                    <option value="Accounting Section">Accounting Section</option>
+                    <option value="Budget Section">Budget Section</option>
+                  </optgroup>
+                </select>
+              </label>
+            </div>
+            <div class="report-actions">
+              <button class="primary-btn" id="generate-report">Generate Report</button>
+              <button class="green-btn" id="download-report">Download PDF</button>
+            </div>
+            <div id="report-preview" class="report-preview"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>Employee Daily Reports</h3>
+              <button class="ghost-btn" id="refresh-reports">Refresh</button>
+            </div>
+            <div class="filters">
+              <input type="date" id="reports-from" />
+              <input type="date" id="reports-to" />
+              <button class="ghost-btn" id="filter-reports">Apply</button>
+            </div>
+            <table class="data-table" id="reports-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Employee</th>
+                  <th>Office</th>
+                  <th>Summary</th>
+                  <th>Attested By</th>
+                  <th>Attested Position</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>Print DTR (Daily Time Record)</h3>
+            </div>
+            <div class="form-grid">
+              <label>
+                Select Employee
+                <select id="dtr-employee">
+                  <option value="" disabled selected>Select Employee</option>
+                </select>
+              </label>
+              <label>
+                Select Month
+                <input type="month" id="dtr-month" />
+              </label>
+            </div>
+            <div class="report-actions">
+              <button class="primary-btn" id="generate-dtr">Generate DTR</button>
+              <button class="green-btn" id="print-dtr">Print DTR</button>
+            </div>
+            <div id="dtr-preview" class="report-preview"></div>
+          </div>
+        </section>
+      </main>
+
+      <div id="add-employee-modal" class="modal hidden">
+        <div class="modal-card">
+          <div class="card-header">
+            <h3>Add Employee</h3>
+            <button class="icon-btn" id="close-add-employee" aria-label="Close">&times;</button>
+          </div>
+          <form id="add-employee-form" class="form-grid two">
+            <label>
+              Full Name
+              <input type="text" name="name" required />
+            </label>
+            <label>
+              Position
+              <input type="text" name="position" required />
+            </label>
+            <label>
+              Office
+              <select name="office" required>
+                <option value="" disabled selected>Select Office</option>
+                <option value="Office of the SDS">Office of the SDS</option>
+                <option value="Office of the ASDS">Office of the ASDS</option>
+                <option value="Legal Unit">Legal Unit</option>
+                <option value="ICT Unit">ICT Unit</option>
+                <option value="Administrative Unit">Administrative Unit</option>
+                <option value="Personnel Section">Personnel Section</option>
+                <option value="Supply Section">Supply Section</option>
+                <option value="Cash Section">Cash Section</option>
+                <option value="Records Section">Records Section</option>
+                <option value="Procurement Section">Procurement Section</option>
+                <option value="Curriculum Implementation Division">Curriculum Implementation Division</option>
+                <option value="School Governance and Operations Division">School Governance and Operations Division</option>
+                <optgroup label="Finance Unit">
+                  <option value="Accounting Section">Accounting Section</option>
+                  <option value="Budget Section">Budget Section</option>
+                </optgroup>
+              </select>
+            </label>
+            <label>
+              Email
+              <input type="email" name="email" required />
+            </label>
+            <label>
+              Password
+              <input type="text" name="password" required />
+            </label>
+            <div class="modal-actions">
+              <button class="primary-btn" type="submit">Save</button>
+              <button class="ghost-btn" type="button" id="cancel-add-employee">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <div id="admin-register-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="card-header">
+          <h3>Create Admin Account</h3>
+          <button class="icon-btn" id="close-admin-register" aria-label="Close">&times;</button>
+        </div>
+        <form id="admin-register-form" class="form-grid two">
+          <label>
+            Full Name
+            <input type="text" name="name" required />
+          </label>
+          <label>
+            Office
+            <select name="office" required>
+              <option value="" disabled selected>Select Office</option>
+              <option value="Office of the SDS">Office of the SDS</option>
+              <option value="Office of the ASDS">Office of the ASDS</option>
+              <option value="Legal Unit">Legal Unit</option>
+              <option value="ICT Unit">ICT Unit</option>
+              <option value="Administrative Unit">Administrative Unit</option>
+              <option value="Personnel Section">Personnel Section</option>
+              <option value="Supply Section">Supply Section</option>
+              <option value="Cash Section">Cash Section</option>
+              <option value="Records Section">Records Section</option>
+              <option value="Procurement Section">Procurement Section</option>
+              <option value="Curriculum Implementation Division">Curriculum Implementation Division</option>
+              <option value="School Governance and Operations Division">School Governance and Operations Division</option>
+              <optgroup label="Finance Unit">
+                <option value="Accounting Section">Accounting Section</option>
+                <option value="Budget Section">Budget Section</option>
+              </optgroup>
+            </select>
+          </label>
+          <label>
+            Username
+            <input type="text" name="username" required />
+          </label>
+          <label>
+            Password
+            <input type="text" name="password" required />
+          </label>
+          <div class="modal-actions">
+            <button class="primary-btn" type="submit">Register</button>
+            <button class="ghost-btn" type="button" id="cancel-admin-register">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="admin-forgot-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="card-header">
+          <h3>Reset Admin Password</h3>
+          <button class="icon-btn" id="close-admin-forgot" aria-label="Close">&times;</button>
+        </div>
+        <form id="admin-forgot-form" class="form-grid two">
+          <label>
+            Username
+            <input type="text" name="username" required />
+          </label>
+          <label>
+            New Password
+            <input type="text" name="newPassword" required />
+          </label>
+          <div class="modal-actions">
+            <button class="primary-btn" type="submit">Update</button>
+            <button class="ghost-btn" type="button" id="cancel-admin-forgot">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="stat-modal" class="modal hidden">
+      <div class="modal-card large">
+        <div class="card-header">
+          <h3 id="stat-modal-title">Status Details</h3>
+          <button class="icon-btn" id="close-stat-modal" aria-label="Close">&times;</button>
+        </div>
+        <p class="modal-subtitle" id="stat-modal-subtitle"></p>
+        <div class="modal-body">
+          <div class="table-wrap">
+            <table class="data-table" id="stat-modal-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Employee</th>
+                  <th>Office</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="panel-empty hidden" id="stat-modal-empty">No records found.</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="photo-preview-modal" class="modal hidden"></div>
+  </div>
+
+  <script src="app.js?v=20260415-1"></script>
+</body>
+</html>
