@@ -152,9 +152,14 @@ const DEFAULT_DB = {
 
 const DB_MODE = String(process.env.DB_MODE || '').trim().toLowerCase();
 const HAS_DATABASE_URL = !!process.env.DATABASE_URL;
-const USE_PG = !!Pool && (DB_MODE === 'postgres' || (!DB_MODE && HAS_DATABASE_URL));
-const pool = USE_PG
-  ? new Pool(
+const WANTS_PG = DB_MODE === 'postgres' || (!DB_MODE && HAS_DATABASE_URL);
+let pgInitError = '';
+let pool = null;
+let USE_PG = false;
+
+if (!!Pool && WANTS_PG) {
+  try {
+    pool = new Pool(
       process.env.DATABASE_URL
         ? { connectionString: process.env.DATABASE_URL }
         : {
@@ -164,8 +169,15 @@ const pool = USE_PG
             password: process.env.PGPASSWORD || 'sdo_pass',
             database: process.env.PGDATABASE || 'sdo_attendance'
           }
-    )
-  : null;
+    );
+    USE_PG = true;
+  } catch (err) {
+    pgInitError = err && err.message ? String(err.message) : 'Failed to initialize PostgreSQL pool';
+    USE_PG = false;
+    pool = null;
+    console.error('PostgreSQL init failed, falling back to JSON mode:', pgInitError);
+  }
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -2857,6 +2869,11 @@ async function handleApiPg(req, res, pathname) {
         configured: Boolean(brevoConfig),
         from: brevoConfig ? brevoConfig.fromEmail : ''
       },
+      postgres: {
+        enabled: USE_PG,
+        wanted: WANTS_PG,
+        initError: pgInitError
+      },
       runtime: {
         requestTimeoutMs: REQUEST_TIMEOUT_MS,
         maxInflightRequests: MAX_INFLIGHT_REQUESTS,
@@ -3832,6 +3849,11 @@ async function handleApi(req, res, pathname) {
         configured: Boolean(brevoConfig),
         from: brevoConfig ? brevoConfig.fromEmail : ''
       },
+      postgres: {
+        enabled: USE_PG,
+        wanted: WANTS_PG,
+        initError: pgInitError
+      },
       runtime: {
         requestTimeoutMs: REQUEST_TIMEOUT_MS,
         maxInflightRequests: MAX_INFLIGHT_REQUESTS,
@@ -4615,7 +4637,10 @@ const app = express();
 app.disable('x-powered-by');
 let inflightRequests = 0;
 app.use((req, res) => {
-  if (inflightRequests >= MAX_INFLIGHT_REQUESTS) {
+  const parsedUrl = url.parse(req.url || '');
+  const isApiRequest = String(parsedUrl.pathname || '').startsWith('/api/');
+
+  if (isApiRequest && inflightRequests >= MAX_INFLIGHT_REQUESTS) {
     setCors(res);
     return sendJson(res, 503, {
       ok: false,
@@ -4635,14 +4660,23 @@ app.use((req, res) => {
   res.on('close', release);
   res.setTimeout(REQUEST_TIMEOUT_MS, () => {
     if (res.headersSent) return;
-    setCors(res);
+    if (isApiRequest) setCors(res);
     sendJson(res, 503, {
       ok: false,
       message: 'Request timed out. Please retry.'
     });
   });
 
-  routeRequest(req, res);
+  Promise.resolve(routeRequest(req, res)).catch((err) => {
+    console.error('Unhandled request error:', err && err.message ? err.message : err);
+    if (!res.headersSent) {
+      if (isApiRequest) setCors(res);
+      sendJson(res, 503, {
+        ok: false,
+        message: 'Service temporarily unavailable. Please retry shortly.'
+      });
+    }
+  });
 });
 
 const PORT = process.env.PORT || 5173;
