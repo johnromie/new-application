@@ -80,6 +80,18 @@ const statCache = {
   employees: []
 };
 
+function normalizeEmployeeStatus(status) {
+  return String(status || 'Active').trim();
+}
+
+function isDeletedEmployee(employee) {
+  return normalizeEmployeeStatus(employee && employee.status).toLowerCase() === 'deleted';
+}
+
+function activeEmployeesFromCache() {
+  return employeesCache.filter((emp) => !isDeletedEmployee(emp));
+}
+
 function formatDate(date) {
   return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 }
@@ -342,12 +354,13 @@ async function buildStatusList(status, from, to) {
   }
 
   await ensureEmployeesLoaded();
-  if (!employeesCache.length) return [];
+  const activeEmployees = activeEmployeesFromCache();
+  if (!activeEmployees.length) return [];
   const seen = new Set(records.map((item) => `${item.date}|${item.employeeId}`));
   const dates = buildDateList(from, to);
   const list = [];
   dates.forEach((date) => {
-    employeesCache.forEach((emp) => {
+    activeEmployees.forEach((emp) => {
       if (!seen.has(`${date}|${emp.id}`)) {
         list.push({
           date,
@@ -419,12 +432,13 @@ function buildStatusListFromBase(status, from, to, attendance, employees) {
       .sort((a, b) => a.date.localeCompare(b.date) || a.employeeName.localeCompare(b.employeeName));
   }
 
-  if (!employees || !employees.length) return [];
+  const activeEmployees = (employees || []).filter((emp) => !isDeletedEmployee(emp));
+  if (!activeEmployees.length) return [];
   const seen = new Set(records.map((item) => `${item.date}|${item.employeeId}`));
   const dates = buildDateList(from, to);
   const list = [];
   dates.forEach((date) => {
-    employees.forEach((emp) => {
+    activeEmployees.forEach((emp) => {
       if (!seen.has(`${date}|${emp.id}`)) {
         list.push({
           date,
@@ -814,13 +828,23 @@ async function loadEmployees() {
 function renderEmployees(list) {
   employeesTable.innerHTML = '';
   list.forEach((emp) => {
+    const statusValue = normalizeEmployeeStatus(emp.status);
+    const deleted = statusValue.toLowerCase() === 'deleted';
+    const actionLabel = deleted ? 'Restore' : 'Delete';
+    const actionType = deleted ? 'restore' : 'delete';
+    const actionClass = deleted ? 'table-action-btn' : 'table-action-btn danger';
     const row = document.createElement('tr');
     row.innerHTML = `
       <td>${emp.id}</td>
       <td>${emp.name}</td>
       <td>${emp.position}</td>
       <td>${emp.office}</td>
-      <td>${emp.status}</td>
+      <td>${statusValue}</td>
+      <td>
+        <button class="${actionClass}" data-employee-action="${actionType}" data-employee-id="${emp.id}">
+          ${actionLabel}
+        </button>
+      </td>
     `;
     employeesTable.appendChild(row);
   });
@@ -1046,12 +1070,37 @@ async function handleReportAttestedSave(button) {
 function populateDtrEmployees() {
   if (!dtrEmployee) return;
   dtrEmployee.innerHTML = '<option value="" disabled selected>Select Employee</option>';
-  employeesCache.forEach((emp) => {
+  activeEmployeesFromCache().forEach((emp) => {
     const option = document.createElement('option');
     option.value = emp.id;
     option.textContent = `${emp.name} (${emp.id})`;
     dtrEmployee.appendChild(option);
   });
+}
+
+async function updateEmployeeStatus(employeeId, actionType) {
+  const endpoint = actionType === 'restore' ? '/api/employees/restore' : '/api/employees/delete';
+  return api(endpoint, {
+    method: 'POST',
+    body: JSON.stringify({ id: employeeId })
+  });
+}
+
+async function handleEmployeesActionClick(event) {
+  const button = event.target.closest('[data-employee-action]');
+  if (!button) return;
+  const actionType = String(button.dataset.employeeAction || '').trim();
+  const employeeId = String(button.dataset.employeeId || '').trim();
+  if (!employeeId || !actionType) return;
+  const label = actionType === 'restore' ? 'restore' : 'delete';
+  const confirmed = window.confirm(`Are you sure you want to ${label} employee ${employeeId}?`);
+  if (!confirmed) return;
+  try {
+    await updateEmployeeStatus(employeeId, actionType);
+    await loadEmployees();
+  } catch (err) {
+    alert(err.message || `Unable to ${label} employee.`);
+  }
 }
 
 async function generateDtr() {
@@ -1605,6 +1654,7 @@ document.getElementById('refresh-attendance').addEventListener('click', () => {
 });
 
 document.getElementById('refresh-employees').addEventListener('click', loadEmployees);
+employeesTable.addEventListener('click', handleEmployeesActionClick);
 
 attendanceTable.addEventListener('click', handleReportPrintClick);
 attendanceHistory.addEventListener('click', handleReportPrintClick);

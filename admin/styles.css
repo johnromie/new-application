@@ -585,6 +585,14 @@ body::before {
   border: 1px solid #cdd7f5;
 }
 
+.table-action-btn.danger {
+  background: #d43b3b;
+}
+
+.table-action-btn.danger:hover {
+  filter: brightness(1.06);
+}
+
 .table-action-btn:hover {
   transform: translateY(-1px);
   filter: brightness(1.03);

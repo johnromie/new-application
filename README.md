@@ -104,6 +104,11 @@ Use this setup so both web (`/admin`, `/employee`) and API (`/api/*`) run in one
    - `DB_PATH=../persistent-data/db.json`
    - `DB_MIRROR_PATH=../persistent-data/db-mirror.json`
    - `ALLOW_SEED=false`
+   - `BREVO_API_KEY=<your-brevo-api-key>`
+   - `BREVO_FROM=<verified-sender@yourdomain.com>`
+   - `BREVO_FROM_NAME=SDO Marinduque Attendance`
+   - `OTP_EMAIL_REQUIRED=true`
+   - `ALLOW_DEV_OTP_FALLBACK=false`
 5. Ensure Node version is `18+`.
 6. Restart the Node app after saving env vars.
 

@@ -71,6 +71,7 @@ const DB_MIRROR_PATH = resolveDataPath(ENV_DB_MIRROR_PATH, HOSTINGER_DB_MIRROR_F
 const DB_MIRROR_BACKUP_PATH = DB_MIRROR_PATH ? `${DB_MIRROR_PATH}.bak` : '';
 const DB_MIRROR_DIR = DB_MIRROR_PATH ? path.dirname(DB_MIRROR_PATH) : '';
 const DB_BACKUP_MIN_INTERVAL_MS = Math.max(0, Number(process.env.DB_BACKUP_MIN_INTERVAL_MS || 60000));
+const IS_PRODUCTION = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
 
 const REVERSE_GEOCODE_CACHE_TTL_MS = Math.max(0, Number(process.env.REVERSE_GEOCODE_CACHE_TTL_MS || 5 * 60 * 1000));
 const REVERSE_GEOCODE_CACHE_LIMIT = Math.max(50, Number(process.env.REVERSE_GEOCODE_CACHE_LIMIT || 2000));
@@ -862,6 +863,12 @@ function normalizeLookup(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function parseBooleanEnv(value, fallback = false) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return !!fallback;
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
 function isEmailAddress(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
@@ -894,6 +901,9 @@ function getBrevoConfig() {
   if (!apiKey || !fromEmail) return null;
   return { apiKey, fromEmail, fromName };
 }
+
+const OTP_EMAIL_REQUIRED = parseBooleanEnv(process.env.OTP_EMAIL_REQUIRED, IS_PRODUCTION);
+const ALLOW_DEV_OTP_FALLBACK = parseBooleanEnv(process.env.ALLOW_DEV_OTP_FALLBACK, !OTP_EMAIL_REQUIRED);
 
 function getGoogleMapsKey() {
   return process.env.GOOGLE_MAPS_KEY || process.env.GMAPS_KEY || '';
@@ -2488,6 +2498,27 @@ async function sendOtpEmail(to, code) {
   return { ok: true, info: responseText };
 }
 
+function otpDeliveryFailureMessage() {
+  return 'OTP email could not be delivered right now. Please try again in a moment or contact admin.';
+}
+
+async function deliverOtpCode(email, otp) {
+  let emailError = '';
+  try {
+    const mailResult = await sendOtpEmail(email, otp);
+    if (!mailResult.ok) {
+      emailError = mailResult.reason || 'Email request failed';
+    }
+  } catch (err) {
+    emailError = err && err.message ? String(err.message) : 'Email request failed';
+  }
+
+  const emailSent = !emailError;
+  const allowFallback = ALLOW_DEV_OTP_FALLBACK && !OTP_EMAIL_REQUIRED;
+  const devOtp = !emailSent && allowFallback ? String(otp) : '';
+  return { emailSent, emailError, devOtp };
+}
+
 function attendanceForDate(db, date) {
   return db.attendance.filter((att) => att.date === date);
 }
@@ -2508,12 +2539,17 @@ function enrichAttendance(db, list) {
 }
 
 function summaryForDate(db, date) {
-  const totalEmployees = db.employees.length;
+  const activeEmployees = (db.employees || []).filter(
+    (emp) => String(emp && emp.status ? emp.status : 'Active').toLowerCase() !== 'deleted'
+  );
+  const activeEmployeeIds = new Set(activeEmployees.map((emp) => emp.id));
+  const totalEmployees = activeEmployees.length;
   const todays = attendanceForDate(db, date);
   const attendedIds = new Set();
   let present = 0;
   let late = 0;
   todays.forEach((att) => {
+    if (!activeEmployeeIds.has(att.employeeId)) return;
     if (!hasAnyAttendance(att)) return;
     attendedIds.add(att.employeeId);
     const status = computeDailyStatus(att);
@@ -2859,9 +2895,20 @@ async function handleApiPg(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/summary') {
     const query = url.parse(req.url, true).query;
     const date = String(query.date || isoToday());
-    const totalRes = await pgQuery('SELECT COUNT(*) AS count FROM employees');
+    const totalRes = await pgQuery(
+      `SELECT COUNT(*) AS count
+       FROM employees
+       WHERE LOWER(COALESCE(status, 'Active')) <> 'deleted'`
+    );
     const totalEmployees = Number(totalRes.rows[0].count);
-    const attendanceRes = await pgQuery('SELECT * FROM attendance WHERE date = $1', [date]);
+    const attendanceRes = await pgQuery(
+      `SELECT a.*
+       FROM attendance a
+       INNER JOIN employees e ON e.id = a.employee_id
+       WHERE a.date = $1
+         AND LOWER(COALESCE(e.status, 'Active')) <> 'deleted'`,
+      [date]
+    );
     const todays = attendanceRes.rows.map(mapAttendanceRow);
     const attendedIds = new Set();
     let present = 0;
@@ -3062,6 +3109,36 @@ async function handleApiPg(req, res, pathname) {
     return sendJson(res, 201, { employee: newEmp });
   }
 
+  if (req.method === 'POST' && pathname === '/api/employees/delete') {
+    const body = await collectBody(req);
+    const employeeId = String(body.id || '').trim();
+    if (!employeeId) {
+      return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
+    }
+    const existing = await pgQuery('SELECT * FROM employees WHERE id = $1', [employeeId]);
+    if (!existing.rows.length) {
+      return sendJson(res, 404, { ok: false, message: 'Employee not found.' });
+    }
+    await pgQuery('UPDATE employees SET status = $1 WHERE id = $2', ['Deleted', employeeId]);
+    const updated = await pgQuery('SELECT * FROM employees WHERE id = $1', [employeeId]);
+    return sendJson(res, 200, { ok: true, employee: mapEmployeeRow(updated.rows[0]) });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/employees/restore') {
+    const body = await collectBody(req);
+    const employeeId = String(body.id || '').trim();
+    if (!employeeId) {
+      return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
+    }
+    const existing = await pgQuery('SELECT * FROM employees WHERE id = $1', [employeeId]);
+    if (!existing.rows.length) {
+      return sendJson(res, 404, { ok: false, message: 'Employee not found.' });
+    }
+    await pgQuery('UPDATE employees SET status = $1 WHERE id = $2', ['Active', employeeId]);
+    const updated = await pgQuery('SELECT * FROM employees WHERE id = $1', [employeeId]);
+    return sendJson(res, 200, { ok: true, employee: mapEmployeeRow(updated.rows[0]) });
+  }
+
   if (req.method === 'POST' && pathname === '/api/admin/register') {
     const body = await collectBody(req);
     const name = String(body.name || '').trim();
@@ -3146,24 +3223,21 @@ async function handleApiPg(req, res, pathname) {
         ]
       );
 
-      let devOtp = '';
-      let emailError = '';
-      try {
-        const mailResult = await sendOtpEmail(email, otp);
-        if (!mailResult.ok) {
-          devOtp = otp;
-          emailError = mailResult.reason || 'Brevo request failed';
-        }
-      } catch (err) {
-        devOtp = otp;
-        emailError = err.message || 'Brevo request failed';
+      const delivery = await deliverOtpCode(email, otp);
+      if (!delivery.emailSent && OTP_EMAIL_REQUIRED) {
+        return sendJson(res, 503, {
+          ok: false,
+          emailSent: false,
+          emailError: delivery.emailError,
+          message: otpDeliveryFailureMessage()
+        });
       }
       return sendJson(res, 200, {
         ok: true,
         employee: existing,
-        devOtp,
-        emailSent: !emailError,
-        emailError,
+        devOtp: delivery.devOtp,
+        emailSent: delivery.emailSent,
+        emailError: delivery.emailError,
         message: 'Account updated. OTP sent to your email.'
       });
     }
@@ -3207,25 +3281,22 @@ async function handleApiPg(req, res, pathname) {
       ]
     );
 
-    let devOtp = '';
-    let emailError = '';
-    try {
-      const mailResult = await sendOtpEmail(email, otp);
-      if (!mailResult.ok) {
-        devOtp = otp;
-        emailError = mailResult.reason || 'Brevo request failed';
-      }
-    } catch (err) {
-      devOtp = otp;
-      emailError = err.message || 'Brevo request failed';
+    const delivery = await deliverOtpCode(email, otp);
+    if (!delivery.emailSent && OTP_EMAIL_REQUIRED) {
+      return sendJson(res, 503, {
+        ok: false,
+        emailSent: false,
+        emailError: delivery.emailError,
+        message: otpDeliveryFailureMessage()
+      });
     }
 
     return sendJson(res, 201, {
       ok: true,
       employee: newEmp,
-      devOtp,
-      emailSent: !emailError,
-      emailError
+      devOtp: delivery.devOtp,
+      emailSent: delivery.emailSent,
+      emailError: delivery.emailError
     });
   }
 
@@ -3272,23 +3343,20 @@ async function handleApiPg(req, res, pathname) {
     const otp = generateOtp();
     const expires = Date.now() + 10 * 60 * 1000;
     await pgQuery('UPDATE employees SET otp = $1, otp_expires_at = $2 WHERE id = $3', [otp, expires, employee.id]);
-    let devOtp = '';
-    let emailError = '';
-    try {
-      const mailResult = await sendOtpEmail(targetEmail, otp);
-      if (!mailResult.ok) {
-        devOtp = otp;
-        emailError = mailResult.reason || 'Brevo request failed';
-      }
-    } catch (err) {
-      devOtp = otp;
-      emailError = err.message || 'Brevo request failed';
+    const delivery = await deliverOtpCode(targetEmail, otp);
+    if (!delivery.emailSent && OTP_EMAIL_REQUIRED) {
+      return sendJson(res, 503, {
+        ok: false,
+        emailSent: false,
+        emailError: delivery.emailError,
+        message: otpDeliveryFailureMessage()
+      });
     }
     return sendJson(res, 200, {
       ok: true,
-      devOtp,
-      emailSent: !emailError,
-      emailError,
+      devOtp: delivery.devOtp,
+      emailSent: delivery.emailSent,
+      emailError: delivery.emailError,
       sentTo: targetEmail
     });
   }
@@ -3347,6 +3415,9 @@ async function handleApiPg(req, res, pathname) {
     const emp = mapEmployeeRow(empRes.rows[0]);
     if (emp.password !== password) {
       return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
+    }
+    if (String(emp.status || '').toLowerCase() === 'deleted') {
+      return sendJson(res, 403, { ok: false, message: 'This employee account is deactivated. Contact admin.' });
     }
     if (emp.verified === false) {
       return sendJson(res, 403, {
@@ -3929,6 +4000,40 @@ async function handleApi(req, res, pathname) {
     });
   }
 
+  if (req.method === 'POST' && pathname === '/api/employees/delete') {
+    return collectBody(req).then((body) => {
+      const db = readDb();
+      const employeeId = String(body.id || '').trim();
+      if (!employeeId) {
+        return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
+      }
+      const employee = db.employees.find((e) => e.id === employeeId);
+      if (!employee) {
+        return sendJson(res, 404, { ok: false, message: 'Employee not found.' });
+      }
+      employee.status = 'Deleted';
+      writeDb(db);
+      return sendJson(res, 200, { ok: true, employee });
+    });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/employees/restore') {
+    return collectBody(req).then((body) => {
+      const db = readDb();
+      const employeeId = String(body.id || '').trim();
+      if (!employeeId) {
+        return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
+      }
+      const employee = db.employees.find((e) => e.id === employeeId);
+      if (!employee) {
+        return sendJson(res, 404, { ok: false, message: 'Employee not found.' });
+      }
+      employee.status = 'Active';
+      writeDb(db);
+      return sendJson(res, 200, { ok: true, employee });
+    });
+  }
+
   if (req.method === 'POST' && pathname === '/api/admin/register') {
     return collectBody(req).then((body) => {
       const db = readDb();
@@ -3994,24 +4099,21 @@ async function handleApi(req, res, pathname) {
         existing.otp = otp;
         existing.otpExpiresAt = Date.now() + 10 * 60 * 1000;
         writeDb(db);
-        let devOtp = '';
-        let emailError = '';
-        try {
-          const mailResult = await sendOtpEmail(email, otp);
-          if (!mailResult.ok) {
-            devOtp = otp;
-            emailError = mailResult.reason || 'Brevo request failed';
-          }
-        } catch (err) {
-          devOtp = otp;
-          emailError = err.message || 'Brevo request failed';
+        const delivery = await deliverOtpCode(email, otp);
+        if (!delivery.emailSent && OTP_EMAIL_REQUIRED) {
+          return sendJson(res, 503, {
+            ok: false,
+            emailSent: false,
+            emailError: delivery.emailError,
+            message: otpDeliveryFailureMessage()
+          });
         }
         return sendJson(res, 200, {
           ok: true,
           employee: existing,
-          devOtp,
-          emailSent: !emailError,
-          emailError,
+          devOtp: delivery.devOtp,
+          emailSent: delivery.emailSent,
+          emailError: delivery.emailError,
           message: 'Account updated. OTP sent to your email.'
         });
       }
@@ -4036,25 +4138,22 @@ async function handleApi(req, res, pathname) {
       db.employees.push(newEmp);
       writeDb(db);
 
-      let devOtp = '';
-      let emailError = '';
-      try {
-        const mailResult = await sendOtpEmail(email, otp);
-        if (!mailResult.ok) {
-          devOtp = otp;
-          emailError = mailResult.reason || 'Brevo request failed';
-        }
-      } catch (err) {
-        devOtp = otp;
-        emailError = err.message || 'Brevo request failed';
+      const delivery = await deliverOtpCode(email, otp);
+      if (!delivery.emailSent && OTP_EMAIL_REQUIRED) {
+        return sendJson(res, 503, {
+          ok: false,
+          emailSent: false,
+          emailError: delivery.emailError,
+          message: otpDeliveryFailureMessage()
+        });
       }
 
       return sendJson(res, 201, {
         ok: true,
         employee: newEmp,
-        devOtp,
-        emailSent: !emailError,
-        emailError
+        devOtp: delivery.devOtp,
+        emailSent: delivery.emailSent,
+        emailError: delivery.emailError
       });
     });
   }
@@ -4109,23 +4208,20 @@ async function handleApi(req, res, pathname) {
       employee.otp = otp;
       employee.otpExpiresAt = Date.now() + 10 * 60 * 1000;
       writeDb(db);
-      let devOtp = '';
-      let emailError = '';
-      try {
-        const mailResult = await sendOtpEmail(targetEmail, otp);
-        if (!mailResult.ok) {
-          devOtp = otp;
-          emailError = mailResult.reason || 'Brevo request failed';
-        }
-      } catch (err) {
-        devOtp = otp;
-        emailError = err.message || 'Brevo request failed';
+      const delivery = await deliverOtpCode(targetEmail, otp);
+      if (!delivery.emailSent && OTP_EMAIL_REQUIRED) {
+        return sendJson(res, 503, {
+          ok: false,
+          emailSent: false,
+          emailError: delivery.emailError,
+          message: otpDeliveryFailureMessage()
+        });
       }
       return sendJson(res, 200, {
         ok: true,
-        devOtp,
-        emailSent: !emailError,
-        emailError,
+        devOtp: delivery.devOtp,
+        emailSent: delivery.emailSent,
+        emailError: delivery.emailError,
         sentTo: targetEmail
       });
     });
@@ -4187,6 +4283,9 @@ async function handleApi(req, res, pathname) {
       );
       if (!emp || emp.password !== password) {
         return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
+      }
+      if (String(emp.status || '').toLowerCase() === 'deleted') {
+        return sendJson(res, 403, { ok: false, message: 'This employee account is deactivated. Contact admin.' });
       }
       if (emp.verified === false) {
         return sendJson(res, 403, {

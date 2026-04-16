@@ -2168,20 +2168,11 @@ function closeRegisterModal() {
 function notifyOtpDelivery(result, options = {}) {
   const successMessage = options.successMessage || 'OTP sent to your email.';
   const contextPrefix = options.contextPrefix || '';
-  const otp = result && result.devOtp ? String(result.devOtp).trim() : '';
+  const emailSent = !!(result && result.emailSent);
   const emailError = result && result.emailError ? String(result.emailError).trim() : '';
   const prefixText = contextPrefix ? `${contextPrefix} ` : '';
 
-  if (otp) {
-    if (emailError) {
-      alert(`${prefixText}Email service is currently unavailable.\n\nUse this OTP code: ${otp}`);
-    } else {
-      alert(`${prefixText}Use this OTP code: ${otp}`);
-    }
-    return;
-  }
-
-  if (emailError) {
+  if (!emailSent || emailError) {
     alert(`${prefixText}OTP was generated, but email delivery is unavailable right now. Please tap Resend OTP or contact your admin.`);
     return;
   }
