@@ -451,7 +451,80 @@ function normalizeDb(db) {
   if (!safe.admins.length) {
     safe.admins = JSON.parse(JSON.stringify(DEFAULT_DB.admins));
   }
+  migrateEmpIdsToSdo(safe);
   return safe;
+}
+
+function normalizeEmployeeIdToSdo(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const match = /^EMP[-_]?(\d+)$/i.exec(raw.replace(/\s+/g, ''));
+  if (!match) return '';
+  const digits = String(match[1] || '').replace(/\D+/g, '');
+  if (!digits) return '';
+  const width = Math.max(4, digits.length);
+  return `SDO-${digits.padStart(width, '0')}`;
+}
+
+function migrateEmpIdsToSdo(db) {
+  // Idempotent migration: converts EMP-0001 style ids to SDO-0001 and updates references.
+  const mapping = new Map();
+  const existingIds = new Set((db.employees || []).map((e) => String(e && e.id ? e.id : '').trim()).filter(Boolean));
+
+  for (const emp of db.employees || []) {
+    if (!emp || !emp.id) continue;
+    const oldId = String(emp.id).trim();
+    const newId = normalizeEmployeeIdToSdo(oldId);
+    if (!newId || newId === oldId) continue;
+    if (existingIds.has(newId)) {
+      // Avoid collisions; skip migration for this record.
+      continue;
+    }
+    mapping.set(oldId, newId);
+    existingIds.delete(oldId);
+    existingIds.add(newId);
+    emp.id = newId;
+  }
+
+  if (!mapping.size) return;
+
+  const rewriteId = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return raw;
+    return mapping.get(raw) || raw;
+  };
+
+  const rewriteText = (value) => {
+    let text = String(value || '');
+    if (!text) return text;
+    for (const [oldId, newId] of mapping.entries()) {
+      text = text.split(oldId).join(newId);
+    }
+    return text;
+  };
+
+  for (const item of db.attendance || []) {
+    if (!item) continue;
+    if (item.employeeId) item.employeeId = rewriteId(item.employeeId);
+    if (item.id) item.id = rewriteText(item.id);
+  }
+  for (const item of db.notifications || []) {
+    if (!item) continue;
+    if (item.employeeId) item.employeeId = rewriteId(item.employeeId);
+  }
+  for (const item of db.messages || []) {
+    if (!item) continue;
+    if (item.employeeId) item.employeeId = rewriteId(item.employeeId);
+  }
+  for (const item of db.concerns || []) {
+    if (!item) continue;
+    if (item.employeeId) item.employeeId = rewriteId(item.employeeId);
+  }
+  for (const item of db.reports || []) {
+    if (!item) continue;
+    if (item.employeeId) item.employeeId = rewriteId(item.employeeId);
+    if (item.id) item.id = rewriteText(item.id);
+  }
 }
 
 function getDbScore(db) {
@@ -877,11 +950,18 @@ function normalizeAttendanceRecord(record) {
 function findEmployeeByLogin(db, value) {
   const lookup = String(value || '').trim().toLowerCase();
   if (!lookup) return null;
-  return db.employees.find((e) =>
-    (e.username && e.username.toLowerCase() === lookup) ||
-    (e.email && e.email.toLowerCase() === lookup) ||
-    (e.id && e.id.toLowerCase() === lookup) ||
-    (e.name && e.name.toLowerCase() === lookup)
+  const altLookup =
+    lookup.startsWith('sdo-') ? lookup.replace(/^sdo-/, 'emp-') : lookup.startsWith('emp-') ? lookup.replace(/^emp-/, 'sdo-') : '';
+  return (
+    db.employees.find((e) =>
+      (e.username && e.username.toLowerCase() === lookup) ||
+      (e.email && e.email.toLowerCase() === lookup) ||
+      (e.id && e.id.toLowerCase() === lookup) ||
+      (e.name && e.name.toLowerCase() === lookup)
+    ) ||
+    (altLookup
+      ? db.employees.find((e) => (e.id && e.id.toLowerCase() === altLookup) || (e.username && e.username.toLowerCase() === altLookup))
+      : null)
   );
 }
 
@@ -3116,7 +3196,7 @@ async function handleApiPg(req, res, pathname) {
     const body = await collectBody(req);
     const email = normalizeEmail(body.email || '');
     const countRes = await pgQuery('SELECT COUNT(*) AS count FROM employees');
-    const nextId = body.id || `SDO-${String(Number(countRes.rows[0].count) + 1).padStart(3, '0')}`;
+    const nextId = body.id || `SDO-${String(Number(countRes.rows[0].count) + 1).padStart(4, '0')}`;
     const newEmp = {
       id: nextId,
       name: body.name || 'New Employee',
@@ -4057,7 +4137,7 @@ async function handleApi(req, res, pathname) {
       const db = readDb();
       const email = normalizeEmail(body.email || '');
       const newEmp = {
-        id: body.id || `SDO-${String(db.employees.length + 1).padStart(3, '0')}`,
+        id: body.id || `SDO-${String(db.employees.length + 1).padStart(4, '0')}`,
         name: body.name || 'New Employee',
         position: body.position || 'Staff',
         office: body.office || 'Office',

@@ -5,6 +5,8 @@ npm-debug.log*
 .env.production
 data/backups/
 android/.gradle/
+android/.gradle-user-home/
+android/.android-user-home/
 android/build/
 android/app/build/
 ios/App/App/public/
