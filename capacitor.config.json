@@ -2,5 +2,9 @@
   "appId": "com.sdo.attendance.employee",
   "appName": "Attendance Employee App",
   "webDir": "employee",
-  "bundledWebRuntime": false
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://sdo-marinduquewfhrecordingsystem.depedmarinduque.com/employee/",
+    "cleartext": false
+  }
 }

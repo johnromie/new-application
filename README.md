@@ -138,6 +138,13 @@ Use this setup so both web (`/admin`, `/employee`) and API (`/api/*`) run in one
 6. Debug APK output path:
    - `android/app/build/outputs/apk/debug/app-debug.apk`
 
+### Auto-update design for Android/iPhone
+
+- Capacitor is configured to load the hosted employee page directly:
+  - `https://sdo-marinduquewfhrecordingsystem.depedmarinduque.com/employee/`
+- This means any design/UI changes you push and deploy to Hostinger are reflected automatically in both Android and iPhone apps (no rebuild needed for UI-only changes).
+- You only need to rebuild app binaries when changing native plugins, app permissions, icons/splash, or app store metadata.
+
 ## iOS App Setup (iPhone)
 
 **Requires Mac with Xcode 15+ installed.**
