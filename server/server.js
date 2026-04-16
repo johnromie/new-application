@@ -205,6 +205,21 @@ async function pgQuery(text, params) {
   return pool.query(text, params);
 }
 
+async function forcePgFallback(reason) {
+  const message = reason && reason.message ? String(reason.message) : String(reason || 'Unknown PostgreSQL error');
+  pgInitError = message;
+  USE_PG = false;
+  if (pool) {
+    try {
+      await pool.end();
+    } catch (_) {
+      // Ignore pool shutdown errors during fallback.
+    }
+  }
+  pool = null;
+  console.error('PostgreSQL unavailable, falling back to JSON mode:', message);
+}
+
 async function ensureSchema() {
   if (!USE_PG) return;
   await pgQuery(
@@ -3821,7 +3836,12 @@ async function handleApi(req, res, pathname) {
   }
 
   if (USE_PG) {
-    return handleApiPg(req, res, pathname);
+    try {
+      return await handleApiPg(req, res, pathname);
+    } catch (err) {
+      await forcePgFallback(err);
+      return handleApi(req, res, pathname);
+    }
   }
 
   if (req.method === 'GET' && pathname === '/api/db-health') {
@@ -4685,6 +4705,9 @@ const PORT = process.env.PORT || 5173;
     await ensureSchema();
   } catch (err) {
     console.error('Database initialization failed:', err.message || err);
+    if (USE_PG) {
+      await forcePgFallback(err);
+    }
   }
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
