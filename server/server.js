@@ -52,7 +52,26 @@ function resolveDataPath(rawPath, fallbackPath = '') {
 
 const CWD_NORMALIZED = String(process.cwd()).replace(/\\/g, '/').toLowerCase();
 const IS_HOSTINGER_LIKE_RUNTIME = CWD_NORMALIZED.includes('/domains/') && CWD_NORMALIZED.includes('/nodejs');
-const ENV_DB_PATH = process.env.DB_PATH || process.env.RENDER_DB_PATH || '';
+
+function normalizeHostingerPersistentEnvPath(rawPath) {
+  const value = String(rawPath || '').trim();
+  if (!value || !IS_HOSTINGER_LIKE_RUNTIME) return value;
+  const unixLike = value.replace(/\\/g, '/');
+  if (/^\.?\/?persistent-data(\/|$)/i.test(unixLike)) {
+    return unixLike.startsWith('../') ? unixLike : `../${unixLike.replace(/^\.?\//, '')}`;
+  }
+  return value;
+}
+
+function isPathInside(parentPath, childPath) {
+  if (!parentPath || !childPath) return false;
+  const parent = path.resolve(parentPath);
+  const child = path.resolve(childPath);
+  const rel = path.relative(parent, child);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+const ENV_DB_PATH = normalizeHostingerPersistentEnvPath(process.env.DB_PATH || process.env.RENDER_DB_PATH || '');
 const HOSTINGER_DB_PATH_FALLBACK = IS_HOSTINGER_LIKE_RUNTIME ? path.join(ROOT, '..', 'persistent-data', 'db.json') : '';
 const DEFAULT_JSON_DB_PATH = HOSTINGER_DB_PATH_FALLBACK || path.join(ROOT, 'data', 'db.json');
 const DATA_PATH = resolveDataPath(ENV_DB_PATH, DEFAULT_JSON_DB_PATH);
@@ -61,7 +80,9 @@ const DATA_DIR = path.dirname(DATA_PATH);
 const LEGACY_DATA_PATH = path.normalize(path.join(ROOT, 'data', 'db.json'));
 const LEGACY_BACKUP_PATH = `${LEGACY_DATA_PATH}.bak`;
 const USE_LEGACY_DB_FALLBACK = LEGACY_DATA_PATH !== path.normalize(DATA_PATH);
-const ENV_DB_MIRROR_PATH = process.env.DB_MIRROR_PATH || process.env.PERSISTENT_DB_PATH || '';
+const ENV_DB_MIRROR_PATH = normalizeHostingerPersistentEnvPath(
+  process.env.DB_MIRROR_PATH || process.env.PERSISTENT_DB_PATH || ''
+);
 const HOSTINGER_DB_MIRROR_FALLBACK = IS_HOSTINGER_LIKE_RUNTIME ? path.join(ROOT, '..', 'persistent-data', 'db-mirror.json') : '';
 const HOME_DB_MIRROR_FALLBACK =
   !HOSTINGER_DB_MIRROR_FALLBACK && String(process.env.NODE_ENV || '').toLowerCase() === 'production'
@@ -72,6 +93,8 @@ const DB_MIRROR_BACKUP_PATH = DB_MIRROR_PATH ? `${DB_MIRROR_PATH}.bak` : '';
 const DB_MIRROR_DIR = DB_MIRROR_PATH ? path.dirname(DB_MIRROR_PATH) : '';
 const DB_BACKUP_MIN_INTERVAL_MS = Math.max(0, Number(process.env.DB_BACKUP_MIN_INTERVAL_MS || 60000));
 const IS_PRODUCTION = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+const DATA_PATH_INSIDE_DEPLOY_ROOT = isPathInside(ROOT, DATA_PATH);
+const DB_MIRROR_PATH_INSIDE_DEPLOY_ROOT = DB_MIRROR_PATH ? isPathInside(ROOT, DB_MIRROR_PATH) : false;
 
 const REVERSE_GEOCODE_CACHE_TTL_MS = Math.max(0, Number(process.env.REVERSE_GEOCODE_CACHE_TTL_MS || 5 * 60 * 1000));
 const REVERSE_GEOCODE_CACHE_LIMIT = Math.max(50, Number(process.env.REVERSE_GEOCODE_CACHE_LIMIT || 2000));
@@ -453,26 +476,19 @@ function shouldWriteBackup(backupPath) {
   return false;
 }
 
-function writeDbFileWithBackup(filePath, backupPath, db) {
+function writeFileAtomicSync(filePath, content) {
+  const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tempPath, content, 'utf8');
+  fs.renameSync(tempPath, filePath);
+}
+
+function writeDbFileWithBackup(filePath, backupPath, serializedDb) {
   const dirPath = path.dirname(filePath);
   ensureDirExists(dirPath);
-  fs.writeFileSync(filePath, JSON.stringify(db), 'utf8');
+  writeFileAtomicSync(filePath, serializedDb);
   if (shouldWriteBackup(backupPath)) {
     try {
       fs.copyFileSync(filePath, backupPath);
-    } catch (err) {
-      // Ignore backup copy failures; main write still proceeds.
-    }
-  }
-}
-
-async function writeDbFileWithBackupAsync(filePath, backupPath, serializedDb) {
-  const dirPath = path.dirname(filePath);
-  ensureDirExists(dirPath);
-  await fs.promises.writeFile(filePath, serializedDb, 'utf8');
-  if (shouldWriteBackup(backupPath)) {
-    try {
-      await fs.promises.copyFile(filePath, backupPath);
     } catch (err) {
       // Ignore backup copy failures; main write still proceeds.
     }
@@ -521,48 +537,6 @@ function readDb() {
   return memoryDb;
 }
 
-let dbWriteInFlight = false;
-let pendingDbSnapshot = null;
-let pendingDbTargets = null;
-
-async function flushDbWriteQueue() {
-  if (dbWriteInFlight || !pendingDbSnapshot || !pendingDbTargets) return;
-  dbWriteInFlight = true;
-  const serialized = pendingDbSnapshot;
-  const targets = pendingDbTargets;
-  pendingDbSnapshot = null;
-  pendingDbTargets = null;
-
-  const warnings = [];
-  let writesOk = 0;
-  try {
-    for (const target of targets) {
-      try {
-        await writeDbFileWithBackupAsync(target.filePath, target.backupPath, serialized);
-        writesOk += 1;
-      } catch (err) {
-        const message = err && err.message ? err.message : 'Unknown write error';
-        warnings.push(`${target.name}(${target.filePath}): ${message}`);
-      }
-    }
-
-    if (writesOk > 0) {
-      lastDbWriteError = '';
-      lastDbWriteWarning = warnings.join(' | ');
-      lastDbWriteOkAt = Date.now();
-    } else {
-      lastDbWriteError = warnings.join(' | ') || 'Unknown DB write error';
-    }
-  } catch (err) {
-    lastDbWriteError = err && err.message ? err.message : 'Unknown DB write error';
-  } finally {
-    dbWriteInFlight = false;
-    if (pendingDbSnapshot && pendingDbTargets) {
-      setImmediate(() => { void flushDbWriteQueue(); });
-    }
-  }
-}
-
 function writeDb(db) {
   memoryDb = normalizeDb(db);
   lastDbWriteAttemptAt = Date.now();
@@ -575,12 +549,26 @@ function writeDb(db) {
     targets.push({ name: 'mirror', filePath: DB_MIRROR_PATH, backupPath: DB_MIRROR_BACKUP_PATH });
   }
 
+  const warnings = [];
+  let writesOk = 0;
   try {
-    pendingDbSnapshot = JSON.stringify(memoryDb);
-    pendingDbTargets = targets;
-    if (!dbWriteInFlight) {
-      setImmediate(() => { void flushDbWriteQueue(); });
+    const serialized = JSON.stringify(memoryDb);
+    for (const target of targets) {
+      try {
+        writeDbFileWithBackup(target.filePath, target.backupPath, serialized);
+        writesOk += 1;
+      } catch (err) {
+        const message = err && err.message ? err.message : 'Unknown write error';
+        warnings.push(`${target.name}(${target.filePath}): ${message}`);
+      }
     }
+    if (writesOk > 0) {
+      lastDbWriteError = '';
+      lastDbWriteWarning = warnings.join(' | ');
+      lastDbWriteOkAt = Date.now();
+      return;
+    }
+    lastDbWriteError = warnings.join(' | ') || 'Unknown DB write error';
   } catch (err) {
     lastDbWriteError = err && err.message ? err.message : 'Unknown DB write error';
   }
@@ -618,6 +606,12 @@ function getJsonDbDiagnostics(db) {
     dbMirrorPath: DB_MIRROR_PATH || '',
     dbMirrorDir: DB_MIRROR_DIR || '',
     dbMirrorEnabled: !!DB_MIRROR_PATH,
+    dataPathInsideDeployRoot: DATA_PATH_INSIDE_DEPLOY_ROOT,
+    dbMirrorPathInsideDeployRoot: DB_MIRROR_PATH_INSIDE_DEPLOY_ROOT,
+    persistenceRisk:
+      IS_HOSTINGER_LIKE_RUNTIME && (DATA_PATH_INSIDE_DEPLOY_ROOT || DB_MIRROR_PATH_INSIDE_DEPLOY_ROOT)
+        ? 'DB path points inside deploy directory. Use ../persistent-data/*.json to survive redeploy.'
+        : '',
     dataDirWritable,
     dataFileExists: fs.existsSync(DATA_PATH),
     dbMirrorFileExists: DB_MIRROR_PATH ? fs.existsSync(DB_MIRROR_PATH) : false,

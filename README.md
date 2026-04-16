@@ -112,6 +112,10 @@ Use this setup so both web (`/admin`, `/employee`) and API (`/api/*`) run in one
 5. Ensure Node version is `18+`.
 6. Restart the Node app after saving env vars.
 
+Important:
+- Use `../persistent-data/...` (with `../`), not `./persistent-data/...`.
+- `./persistent-data` can point inside deploy files and may be reset on redeploy.
+
 ### Hostinger Persistence Notes
 
 - Server now auto-detects Hostinger-like runtime and defaults to persistent storage path.
