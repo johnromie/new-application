@@ -17,6 +17,22 @@
   <link id="employee-stylesheet" rel="stylesheet" href="styles.css" />
   <script>
     window.APP_BUILD = '20260416-remove-attendance-today-card-1';
+    // If the native app is running with bundled assets (https://localhost),
+    // force-load the hosted web app so UI changes update automatically.
+    (function forceHostedCapacitorIfBundled() {
+      try {
+        if (!window.Capacitor) return;
+        var origin = (window.location && window.location.origin) ? String(window.location.origin) : '';
+        if (!/^https?:\/\/localhost$/i.test(origin)) return;
+        var target = 'https://wfh.depedmarinduque.com/employee/';
+        // Prevent redirect loop if we're already hosted.
+        if (String(window.location.href || '').indexOf(target) === 0) return;
+        var url = target + '?v=' + Date.now().toString(36);
+        window.location.replace(url);
+      } catch (e) {
+        // If redirect fails (offline), stay on bundled UI.
+      }
+    })();
     (function applyEmployeeAssetStamp() {
       var build = window.APP_BUILD || 'dev';
       var stamp = build + '-' + Date.now().toString(36);

@@ -1,7 +1,7 @@
 {
   "appId": "com.sdo.attendance.employee",
   "appName": "Attendance Employee App",
-  "webDir": "employee",
+  "webDir": "mobile-shell",
   "bundledWebRuntime": false,
   "server": {
     "url": "https://wfh.depedmarinduque.com/employee/",

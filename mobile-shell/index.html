@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#123f85" />
+    <title>SDO Marinduque - Employee</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <div class="card">
+        <img class="logo" src="https://wfh.depedmarinduque.com/employee/assets/logo.jpg" alt="SDO Logo" />
+        <h1>SDO MARINDUQUE</h1>
+        <p class="subtitle">WFH ATTENDANCE RECORDING SYSTEM</p>
+        <div class="status" id="status">Loading latest version...</div>
+        <button class="btn" id="retry" type="button">Retry</button>
+        <p class="hint">
+          This app loads the live system from the server so design changes update automatically on Android and iPhone.
+        </p>
+      </div>
+    </main>
+
+    <script>
+      (function () {
+        var TARGET = "https://wfh.depedmarinduque.com/employee/";
+        var statusEl = document.getElementById("status");
+        var retryBtn = document.getElementById("retry");
+
+        function go() {
+          // Cache-bust so Android WebView doesn't stick to an old deploy.
+          var url = TARGET + (TARGET.indexOf("?") === -1 ? "?" : "&") + "v=" + Date.now();
+          statusEl.textContent = "Opening " + TARGET + "...";
+          window.location.replace(url);
+        }
+
+        retryBtn.addEventListener("click", go);
+
+        // Quick auto-redirect. If offline, user can retry.
+        try {
+          go();
+        } catch (e) {
+          statusEl.textContent = "Unable to open the server. Check your internet then tap Retry.";
+        }
+      })();
+    </script>
+  </body>
+</html>
