@@ -708,7 +708,7 @@ function isLateMorning(record) {
 function isLateAfternoon(record) {
   const t = record.timeInPM || '';
   const minutes = timeToMinutes(t);
-  return minutes !== null && minutes > 13 * 60;
+  return minutes !== null && minutes > 13 * 60 + 15;
 }
 
 function tickClock() {
@@ -896,9 +896,81 @@ function buildAttendanceSlotStatuses(item) {
   return {
     amIn: getSlotInStatus(times.amIn, 8 * 60),
     amOut: getSlotOutStatus(times.amOut, times.amIn),
-    pmIn: getSlotInStatus(times.pmIn, 13 * 60),
+    pmIn: getSlotInStatus(times.pmIn, 13 * 60 + 15),
     pmOut: getSlotOutStatus(times.pmOut, times.pmIn)
   };
+}
+
+function resolveNextAttendanceSlots() {
+  const record = getTodayAttendance() || {};
+  const amIn = record.timeInAM || record.timeIn || '';
+  const amOut = record.timeOutAM || '';
+  const pmIn = record.timeInPM || '';
+  const pmOut = record.timeOutPM || record.timeOut || '';
+
+  const next = {
+    timeInSlot: '',
+    timeOutSlot: '',
+    done: false
+  };
+
+  // Sequence: AM In -> AM Out -> PM In -> PM Out
+  if (!amIn) {
+    next.timeInSlot = 'AM';
+    next.timeOutSlot = '';
+    return next;
+  }
+  if (!amOut) {
+    next.timeInSlot = '';
+    next.timeOutSlot = 'AM';
+    return next;
+  }
+  if (!pmIn) {
+    next.timeInSlot = 'PM';
+    next.timeOutSlot = '';
+    return next;
+  }
+  if (!pmOut) {
+    next.timeInSlot = '';
+    next.timeOutSlot = 'PM';
+    return next;
+  }
+  next.done = true;
+  return next;
+}
+
+function updateMarkAttendanceButtons() {
+  if (!timeInBtn || !timeOutBtn) return;
+  const next = resolveNextAttendanceSlots();
+  if (next.done) {
+    timeInBtn.textContent = 'DONE';
+    timeOutBtn.textContent = 'DONE';
+    timeInBtn.disabled = true;
+    timeOutBtn.disabled = true;
+    timeInBtn.dataset.slot = '';
+    timeOutBtn.dataset.slot = '';
+    return;
+  }
+
+  if (next.timeInSlot) {
+    timeInBtn.disabled = false;
+    timeInBtn.textContent = `MARK TIME IN (${next.timeInSlot})`;
+    timeInBtn.dataset.slot = next.timeInSlot;
+  } else {
+    timeInBtn.disabled = true;
+    timeInBtn.textContent = 'MARK TIME IN';
+    timeInBtn.dataset.slot = '';
+  }
+
+  if (next.timeOutSlot) {
+    timeOutBtn.disabled = false;
+    timeOutBtn.textContent = `MARK TIME OUT (${next.timeOutSlot})`;
+    timeOutBtn.dataset.slot = next.timeOutSlot;
+  } else {
+    timeOutBtn.disabled = true;
+    timeOutBtn.textContent = 'MARK TIME OUT';
+    timeOutBtn.dataset.slot = '';
+  }
 }
 
 function buildAttendanceSlotDetails(item) {
@@ -1501,6 +1573,7 @@ async function loadAttendance() {
   const data = await api(`/api/attendance?employeeId=${currentUser.id}`);
   attendanceCache = data.attendance;
   updateReportContext();
+  updateMarkAttendanceButtons();
 }
 
 function computeStats() {
@@ -1909,6 +1982,7 @@ async function markTimeIn() {
     timeIn: timeNow(),
     date: isoToday(),
     useServerTime: true,
+    slot: String(timeInBtn && timeInBtn.dataset ? timeInBtn.dataset.slot : '').trim() || undefined,
     location: locationPayload.location,
     latitude: locationPayload.latitude,
     longitude: locationPayload.longitude,
@@ -1970,6 +2044,7 @@ async function markTimeOut() {
     timeOut: timeNow(),
     date: isoToday(),
     useServerTime: true,
+    slot: String(timeOutBtn && timeOutBtn.dataset ? timeOutBtn.dataset.slot : '').trim() || undefined,
     location: locationPayload.location,
     latitude: locationPayload.latitude,
     longitude: locationPayload.longitude,

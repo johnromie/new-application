@@ -852,6 +852,8 @@ const PM_IN_START = 13 * 60;
 const PM_IN_END = 16 * 60 + 59;
 const PM_OUT_START = 17 * 60;
 const BIOMETRIC_SESSION_SPLIT = 13 * 60; // 1:00 PM
+const AM_LATE_CUTOFF_MINUTES = Number(process.env.AM_LATE_CUTOFF_MINUTES || 8 * 60); // 8:00 AM
+const PM_LATE_CUTOFF_MINUTES = Number(process.env.PM_LATE_CUTOFF_MINUTES || (13 * 60 + 15)); // 1:15 PM
 
 function classifyTimeIn(time) {
   const minutes = timeToMinutes(time);
@@ -867,6 +869,12 @@ function classifyTimeOut(time) {
     return { ok: false, message: 'Invalid time.' };
   }
   return { ok: true, session: minutes >= BIOMETRIC_SESSION_SPLIT ? 'PM' : 'AM' };
+}
+
+function normalizeAttendanceSlot(value) {
+  const slot = String(value || '').trim().toUpperCase();
+  if (slot === 'AM' || slot === 'PM') return slot;
+  return '';
 }
 
 function hasAnyAttendance(record) {
@@ -886,7 +894,7 @@ function hasAnyAttendance(record) {
 function computeStatus(timeIn) {
   if (!timeIn) return 'Absent';
   const minutes = timeToMinutes(timeIn);
-  return minutes <= 8 * 60 ? 'Present' : 'Late';
+  return minutes !== null && minutes <= AM_LATE_CUTOFF_MINUTES ? 'Present' : 'Late';
 }
 
 function computeDailyStatus(record) {
@@ -894,8 +902,8 @@ function computeDailyStatus(record) {
   const amIn = record.timeInAM || record.timeIn || '';
   const pmIn = record.timeInPM || '';
   let late = false;
-  if (amIn && timeToMinutes(amIn) > 8 * 60) late = true;
-  if (pmIn && timeToMinutes(pmIn) > 13 * 60) late = true;
+  if (amIn && timeToMinutes(amIn) > AM_LATE_CUTOFF_MINUTES) late = true;
+  if (pmIn && timeToMinutes(pmIn) > PM_LATE_CUTOFF_MINUTES) late = true;
   return late ? 'Late' : 'Present';
 }
 
@@ -3612,11 +3620,10 @@ async function handleApiPg(req, res, pathname) {
     const employeeId = body.employeeId;
     const rawTime = String(body.timeIn || '').trim();
     const timeIn = useServerTime ? nowPH.time : (rawTime || nowPH.time);
+    const requestedSlot = normalizeAttendanceSlot(body.slot || body.session);
     const timeWindow = classifyTimeIn(timeIn);
-    if (!timeWindow.ok) {
-      return sendJson(res, 400, { message: timeWindow.message });
-    }
-    const session = timeWindow.session;
+    if (!timeWindow.ok) return sendJson(res, 400, { message: timeWindow.message });
+    const session = requestedSlot || timeWindow.session;
     const photo = body.photo || '';
     const location = body.location || '';
     const latitude = body.latitude || '';
@@ -3711,11 +3718,10 @@ async function handleApiPg(req, res, pathname) {
     const employeeId = body.employeeId;
     const rawTime = String(body.timeOut || '').trim();
     const timeOut = useServerTime ? nowPH.time : (rawTime || nowPH.time);
+    const requestedSlot = normalizeAttendanceSlot(body.slot || body.session);
     const timeWindow = classifyTimeOut(timeOut);
-    if (!timeWindow.ok) {
-      return sendJson(res, 400, { message: timeWindow.message });
-    }
-    const session = timeWindow.session;
+    if (!timeWindow.ok) return sendJson(res, 400, { message: timeWindow.message });
+    const session = requestedSlot || timeWindow.session;
     const photo = body.photo || '';
     const location = body.location || '';
     const latitude = body.latitude || '';
@@ -4488,7 +4494,8 @@ async function handleApi(req, res, pathname) {
       if (!timeWindow.ok) {
         return sendJson(res, 400, { message: timeWindow.message });
       }
-      const session = timeWindow.session;
+      const requestedSlot = normalizeAttendanceSlot(body.slot || body.session);
+      const session = requestedSlot || timeWindow.session;
       const photo = body.photo || '';
       const location = body.location || '';
       const latitude = body.latitude || '';
@@ -4587,7 +4594,8 @@ async function handleApi(req, res, pathname) {
       if (!timeWindow.ok) {
         return sendJson(res, 400, { message: timeWindow.message });
       }
-      const session = timeWindow.session;
+      const requestedSlot = normalizeAttendanceSlot(body.slot || body.session);
+      const session = requestedSlot || timeWindow.session;
       const photo = body.photo || '';
       const location = body.location || '';
       const latitude = body.latitude || '';
