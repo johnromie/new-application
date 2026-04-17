@@ -461,6 +461,15 @@
     <div id="photo-preview-modal" class="modal hidden"></div>
   </div>
 
-  <script src="app.js?v=20260415-1"></script>
-</body>
+  <script> 
+    (function loadAdminScripts() { 
+      // Always bust caches so CID/SGOD scoping and other fixes apply immediately after deploys.
+      var stamp = encodeURIComponent((window.APP_ASSET_STAMP || Date.now()).toString(36)); 
+      var script = document.createElement('script'); 
+      script.src = 'app.js?v=' + stamp; 
+      script.defer = true; 
+      document.body.appendChild(script); 
+    })(); 
+  </script> 
+</body> 
 </html>
