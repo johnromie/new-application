@@ -39,10 +39,12 @@ const gpsStatus = document.getElementById('gps-status');
 const openMapCurrentBtn = document.getElementById('open-map-current');
 const refreshLocationBtn = document.getElementById('refresh-location');
 
-const timeInBtn = document.getElementById('time-in');
-const timeOutBtn = document.getElementById('time-out');
-const gpsRefreshBtn = document.getElementById('gps-refresh');
-const attendanceNotice = document.getElementById('attendance-notice');
+const timeInAmBtn = document.getElementById('time-in-am'); 
+const timeOutAmBtn = document.getElementById('time-out-am'); 
+const timeInPmBtn = document.getElementById('time-in-pm'); 
+const timeOutPmBtn = document.getElementById('time-out-pm'); 
+const gpsRefreshBtn = document.getElementById('gps-refresh'); 
+const attendanceNotice = document.getElementById('attendance-notice'); 
 
 const recordsTable = document.getElementById('records-table').querySelector('tbody');
 const recordsMonth = document.getElementById('records-month');
@@ -705,11 +707,11 @@ function isLateMorning(record) {
   return minutes !== null && minutes > 8 * 60;
 }
 
-function isLateAfternoon(record) {
-  const t = record.timeInPM || '';
-  const minutes = timeToMinutes(t);
-  return minutes !== null && minutes > 13 * 60 + 15;
-}
+function isLateAfternoon(record) { 
+  const t = record.timeInPM || ''; 
+  const minutes = timeToMinutes(t); 
+  return minutes !== null && minutes > 13 * 60; 
+} 
 
 function tickClock() {
   const now = new Date();
@@ -904,15 +906,15 @@ function getSlotOutStatus(timeOut, timeIn) {
   return 'Recorded';
 }
 
-function buildAttendanceSlotStatuses(item) {
-  const times = buildAttendanceSlotTimes(item);
-  return {
-    amIn: getSlotInStatus(times.amIn, 8 * 60),
-    amOut: getSlotOutStatus(times.amOut, times.amIn),
-    pmIn: getSlotInStatus(times.pmIn, 13 * 60 + 15),
-    pmOut: getSlotOutStatus(times.pmOut, times.pmIn)
-  };
-}
+function buildAttendanceSlotStatuses(item) { 
+  const times = buildAttendanceSlotTimes(item); 
+  return { 
+    amIn: getSlotInStatus(times.amIn, 8 * 60), 
+    amOut: getSlotOutStatus(times.amOut, times.amIn), 
+    pmIn: getSlotInStatus(times.pmIn, 13 * 60), 
+    pmOut: getSlotOutStatus(times.pmOut, times.pmIn) 
+  }; 
+} 
 
 function resolveNextAttendanceSlots() {
   const record = getTodayAttendance() || {};
@@ -953,39 +955,41 @@ function resolveNextAttendanceSlots() {
   return next;
 }
 
-function updateMarkAttendanceButtons() {
-  if (!timeInBtn || !timeOutBtn) return;
-  const next = resolveNextAttendanceSlots();
-  if (next.done) {
-    timeInBtn.textContent = 'COMPLETED';
-    timeOutBtn.textContent = 'COMPLETED';
-    timeInBtn.disabled = true;
-    timeOutBtn.disabled = true;
-    timeInBtn.dataset.slot = '';
-    timeOutBtn.dataset.slot = '';
-    return;
-  }
-
-  if (next.timeInSlot) {
-    timeInBtn.disabled = false;
-    timeInBtn.textContent = `MARK TIME IN (${next.timeInSlot})`;
-    timeInBtn.dataset.slot = next.timeInSlot;
-  } else {
-    timeInBtn.disabled = true;
-    timeInBtn.textContent = 'MARK TIME IN';
-    timeInBtn.dataset.slot = '';
-  }
-
-  if (next.timeOutSlot) {
-    timeOutBtn.disabled = false;
-    timeOutBtn.textContent = `MARK TIME OUT (${next.timeOutSlot})`;
-    timeOutBtn.dataset.slot = next.timeOutSlot;
-  } else {
-    timeOutBtn.disabled = true;
-    timeOutBtn.textContent = 'MARK TIME OUT';
-    timeOutBtn.dataset.slot = '';
-  }
+function getMinutesNowLocal() {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
 }
+
+function setAttendanceButtonState(btn, enabled) {
+  if (!btn) return;
+  btn.disabled = !enabled;
+}
+
+function updateMarkAttendanceButtons() { 
+  if (!timeInAmBtn || !timeOutAmBtn || !timeInPmBtn || !timeOutPmBtn) return; 
+  const record = getTodayAttendance() || {}; 
+  const times = buildAttendanceSlotTimes(record); 
+  const amInDone = !!times.amIn; 
+  const amOutDone = !!times.amOut; 
+  const pmInDone = !!times.pmIn; 
+  const pmOutDone = !!times.pmOut; 
+
+  const minutesNow = getMinutesNowLocal();
+  const allowPm = minutesNow >= 13 * 60; // after 1:00 PM
+
+  // Always show 4 buttons; enable only the next valid action.
+  setAttendanceButtonState(timeInAmBtn, !amInDone); 
+  setAttendanceButtonState(timeOutAmBtn, amInDone && !amOutDone); 
+
+  // PM time-in only after AM out AND after 1:00 PM.
+  setAttendanceButtonState(timeInPmBtn, amInDone && amOutDone && !pmInDone && allowPm); 
+  setAttendanceButtonState(timeOutPmBtn, pmInDone && !pmOutDone); 
+
+  // Small UX hint when PM is not yet available.
+  if (amInDone && amOutDone && !pmInDone && !allowPm) {
+    setAttendanceNotice('Time In (PM) will be available after 1:00 PM.', 'loading');
+  }
+} 
 
 function buildAttendanceSlotDetails(item) {
   const details = {
@@ -1927,32 +1931,29 @@ function setAttendanceNotice(message, tone = 'loading') {
   attendanceNotice.classList.add(safeTone);
 }
 
-function setAttendanceButtonsLocked(locked, action = '') {
-  if (!timeInBtn || !timeOutBtn) return;
+function setAttendanceButtonsLocked(locked, activeBtn = null) { 
+  const btns = [timeInAmBtn, timeOutAmBtn, timeInPmBtn, timeOutPmBtn].filter(Boolean);
+  if (btns.length === 0) return;
 
-  if (!timeInBtn.dataset.defaultLabel) timeInBtn.dataset.defaultLabel = timeInBtn.textContent;
-  if (!timeOutBtn.dataset.defaultLabel) timeOutBtn.dataset.defaultLabel = timeOutBtn.textContent;
-
-  timeInBtn.disabled = locked;
-  timeOutBtn.disabled = locked;
+  btns.forEach((btn) => {
+    if (!btn.dataset.defaultLabel) btn.dataset.defaultLabel = btn.textContent;
+    btn.disabled = locked || btn.disabled;
+  });
 
   if (locked) {
-    if (action === 'timein') {
-      timeInBtn.textContent = 'PLEASE WAIT...';
-      timeOutBtn.textContent = timeOutBtn.dataset.defaultLabel;
-    } else if (action === 'timeout') {
-      timeOutBtn.textContent = 'PLEASE WAIT...';
-      timeInBtn.textContent = timeInBtn.dataset.defaultLabel;
-    } else {
-      timeInBtn.textContent = 'PLEASE WAIT...';
-      timeOutBtn.textContent = 'PLEASE WAIT...';
+    if (activeBtn && activeBtn.dataset) {
+      activeBtn.textContent = 'PLEASE WAIT...';
     }
     return;
   }
 
-  timeInBtn.textContent = timeInBtn.dataset.defaultLabel;
-  timeOutBtn.textContent = timeOutBtn.dataset.defaultLabel;
-}
+  btns.forEach((btn) => {
+    btn.textContent = btn.dataset.defaultLabel || btn.textContent;
+  });
+
+  // Recompute enabled states after unlocking.
+  updateMarkAttendanceButtons();
+} 
 
 function pickRecordedTime(result, action) {
   const attendance = result && result.attendance ? result.attendance : null;
@@ -1968,40 +1969,40 @@ function pickRecordedTime(result, action) {
     : (attendance.timeOutAM || attendance.timeOut || '');
 }
 
-async function markTimeIn() {
-  if (attendanceRequestInFlight) {
-    setAttendanceNotice('Please wait... your previous attendance request is still processing.', 'loading');
-    return;
-  }
-  setAttendanceNotice('Please wait... preparing Time In.', 'loading');
-  void primeAttendanceAudio();
-  void playAttendanceSound('timein');
-  if (!requirePhoto()) {
-    setAttendanceNotice('Unable to continue Time In.', 'error');
-    return;
-  }
-  if (!currentUser || !currentUser.id) {
-    void playAttendanceSound('error');
-    setAttendanceNotice('Please log in first before Time In.', 'error');
-    alert('Please log in first.');
-    return;
-  }
-
-  attendanceRequestInFlight = true;
-  setAttendanceButtonsLocked(true, 'timein');
-  setAttendanceNotice('Please wait... recording your Time In.', 'loading');
-  const locationPayload = getAttendanceLocationPayload();
-  const payload = {
-    employeeId: currentUser.id,
-    timeIn: timeNow(),
-    date: isoToday(),
-    useServerTime: true,
-    slot: String(timeInBtn && timeInBtn.dataset ? timeInBtn.dataset.slot : '').trim() || undefined,
-    location: locationPayload.location,
-    latitude: locationPayload.latitude,
-    longitude: locationPayload.longitude,
-    photo: photoData
-  };
+async function markTimeIn(slot, sourceBtn) { 
+  if (attendanceRequestInFlight) { 
+    setAttendanceNotice('Please wait... your previous attendance request is still processing.', 'loading'); 
+    return; 
+  } 
+  setAttendanceNotice('Please wait... preparing Time In.', 'loading'); 
+  void primeAttendanceAudio(); 
+  void playAttendanceSound('timein'); 
+  if (!requirePhoto()) { 
+    setAttendanceNotice('Unable to continue Time In.', 'error'); 
+    return; 
+  } 
+  if (!currentUser || !currentUser.id) { 
+    void playAttendanceSound('error'); 
+    setAttendanceNotice('Please log in first before Time In.', 'error'); 
+    alert('Please log in first.'); 
+    return; 
+  } 
+ 
+  attendanceRequestInFlight = true; 
+  setAttendanceButtonsLocked(true, sourceBtn || null); 
+  setAttendanceNotice('Please wait... recording your Time In.', 'loading'); 
+  const locationPayload = getAttendanceLocationPayload(); 
+  const payload = { 
+    employeeId: currentUser.id, 
+    timeIn: timeNow(), 
+    date: isoToday(), 
+    useServerTime: true, 
+    slot: String(slot || '').trim() || undefined, 
+    location: locationPayload.location, 
+    latitude: locationPayload.latitude, 
+    longitude: locationPayload.longitude, 
+    photo: photoData 
+  }; 
   try {
     const result = await api('/api/attendance/timein', { method: 'POST', body: JSON.stringify(payload) });
     clearPhotoSelection();
@@ -2024,46 +2025,46 @@ async function markTimeIn() {
     const errorMessage = err.message || 'Time in failed.';
     setAttendanceNotice(errorMessage, 'error');
     alert(errorMessage);
-  } finally {
-    attendanceRequestInFlight = false;
-    setAttendanceButtonsLocked(false);
-  }
-}
+  } finally { 
+    attendanceRequestInFlight = false; 
+    setAttendanceButtonsLocked(false); 
+  } 
+} 
 
-async function markTimeOut() {
-  if (attendanceRequestInFlight) {
-    setAttendanceNotice('Please wait... your previous attendance request is still processing.', 'loading');
-    return;
-  }
-  setAttendanceNotice('Please wait... preparing Time Out.', 'loading');
-  void primeAttendanceAudio();
-  void playAttendanceSound('timeout');
-  if (!requirePhoto()) {
-    setAttendanceNotice('Unable to continue Time Out.', 'error');
-    return;
-  }
-  if (!currentUser || !currentUser.id) {
-    void playAttendanceSound('error');
-    setAttendanceNotice('Please log in first before Time Out.', 'error');
-    alert('Please log in first.');
-    return;
-  }
-
-  attendanceRequestInFlight = true;
-  setAttendanceButtonsLocked(true, 'timeout');
-  setAttendanceNotice('Please wait... recording your Time Out.', 'loading');
-  const locationPayload = getAttendanceLocationPayload();
-  const payload = {
-    employeeId: currentUser.id,
-    timeOut: timeNow(),
-    date: isoToday(),
-    useServerTime: true,
-    slot: String(timeOutBtn && timeOutBtn.dataset ? timeOutBtn.dataset.slot : '').trim() || undefined,
-    location: locationPayload.location,
-    latitude: locationPayload.latitude,
-    longitude: locationPayload.longitude,
-    photo: photoData
-  };
+async function markTimeOut(slot, sourceBtn) { 
+  if (attendanceRequestInFlight) { 
+    setAttendanceNotice('Please wait... your previous attendance request is still processing.', 'loading'); 
+    return; 
+  } 
+  setAttendanceNotice('Please wait... preparing Time Out.', 'loading'); 
+  void primeAttendanceAudio(); 
+  void playAttendanceSound('timeout'); 
+  if (!requirePhoto()) { 
+    setAttendanceNotice('Unable to continue Time Out.', 'error'); 
+    return; 
+  } 
+  if (!currentUser || !currentUser.id) { 
+    void playAttendanceSound('error'); 
+    setAttendanceNotice('Please log in first before Time Out.', 'error'); 
+    alert('Please log in first.'); 
+    return; 
+  } 
+ 
+  attendanceRequestInFlight = true; 
+  setAttendanceButtonsLocked(true, sourceBtn || null); 
+  setAttendanceNotice('Please wait... recording your Time Out.', 'loading'); 
+  const locationPayload = getAttendanceLocationPayload(); 
+  const payload = { 
+    employeeId: currentUser.id, 
+    timeOut: timeNow(), 
+    date: isoToday(), 
+    useServerTime: true, 
+    slot: String(slot || '').trim() || undefined, 
+    location: locationPayload.location, 
+    latitude: locationPayload.latitude, 
+    longitude: locationPayload.longitude, 
+    photo: photoData 
+  }; 
   try {
     const result = await api('/api/attendance/timeout', { method: 'POST', body: JSON.stringify(payload) });
     clearPhotoSelection();
@@ -2086,11 +2087,11 @@ async function markTimeOut() {
     const errorMessage = err.message || 'Time out failed.';
     setAttendanceNotice(errorMessage, 'error');
     alert(errorMessage);
-  } finally {
-    attendanceRequestInFlight = false;
-    setAttendanceButtonsLocked(false);
-  }
-}
+  } finally { 
+    attendanceRequestInFlight = false; 
+    setAttendanceButtonsLocked(false); 
+  } 
+} 
 
 async function startEmployeeSession(user) {
   currentUser = user;
@@ -2559,11 +2560,15 @@ function bindAttendanceAudioWarmup(button) {
   });
 }
 
-bindAttendanceAudioWarmup(timeInBtn);
-bindAttendanceAudioWarmup(timeOutBtn);
-
-timeInBtn.addEventListener('click', markTimeIn);
-timeOutBtn.addEventListener('click', markTimeOut);
+bindAttendanceAudioWarmup(timeInAmBtn); 
+bindAttendanceAudioWarmup(timeOutAmBtn); 
+bindAttendanceAudioWarmup(timeInPmBtn); 
+bindAttendanceAudioWarmup(timeOutPmBtn); 
+ 
+if (timeInAmBtn) timeInAmBtn.addEventListener('click', () => markTimeIn('AM', timeInAmBtn)); 
+if (timeOutAmBtn) timeOutAmBtn.addEventListener('click', () => markTimeOut('AM', timeOutAmBtn)); 
+if (timeInPmBtn) timeInPmBtn.addEventListener('click', () => markTimeIn('PM', timeInPmBtn)); 
+if (timeOutPmBtn) timeOutPmBtn.addEventListener('click', () => markTimeOut('PM', timeOutPmBtn)); 
 
 if (takePhotoBtn) {
   takePhotoBtn.addEventListener('click', (event) => {

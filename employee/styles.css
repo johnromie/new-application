@@ -515,11 +515,11 @@ body::before {
   color: #5b6b91;
 }
 
-.action-row {
-  display: flex;
-  gap: 10px;
-  margin-top: 14px;
-}
+.action-row { 
+  display: flex; 
+  gap: 10px; 
+  margin-top: 14px; 
+} 
 
 .action-row .primary-btn {
   flex: 1;
@@ -532,7 +532,27 @@ body::before {
   padding: 12px;
 }
 
-.action-row button[disabled] {
+.action-row button[disabled] { 
+  opacity: 0.75; 
+  cursor: not-allowed; 
+  transform: none; 
+  filter: none; 
+} 
+
+.attendance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.attendance-grid .ghost-btn {
+  background: #eef2ff;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.attendance-grid button[disabled] {
   opacity: 0.75;
   cursor: not-allowed;
   transform: none;
