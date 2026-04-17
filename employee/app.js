@@ -875,8 +875,21 @@ function buildAttendanceSlotTimes(item) {
     pmIn: item.timeInPM || '',
     pmOut: item.timeOutPM || ''
   };
-  if (!values.amIn && item.timeIn && !values.pmIn) values.amIn = item.timeIn;
-  if (!values.pmOut && item.timeOut) values.pmOut = item.timeOut;
+
+  // Legacy compatibility: some records only have timeIn/timeOut (no AM/PM split).
+  // Classify by time of day to avoid treating an AM out as a PM out.
+  if (!values.amIn && item.timeIn && !values.pmIn) {
+    const minutes = timeToMinutes(item.timeIn);
+    if (minutes !== null && minutes >= 13 * 60) values.pmIn = item.timeIn;
+    else values.amIn = item.timeIn;
+  }
+
+  if (!values.amOut && item.timeOut && !values.pmOut) {
+    const minutes = timeToMinutes(item.timeOut);
+    if (minutes !== null && minutes >= 13 * 60) values.pmOut = item.timeOut;
+    else values.amOut = item.timeOut;
+  }
+
   return values;
 }
 
@@ -903,10 +916,11 @@ function buildAttendanceSlotStatuses(item) {
 
 function resolveNextAttendanceSlots() {
   const record = getTodayAttendance() || {};
-  const amIn = record.timeInAM || record.timeIn || '';
-  const amOut = record.timeOutAM || '';
-  const pmIn = record.timeInPM || '';
-  const pmOut = record.timeOutPM || record.timeOut || '';
+  const times = buildAttendanceSlotTimes(record);
+  const amIn = times.amIn || '';
+  const amOut = times.amOut || '';
+  const pmIn = times.pmIn || '';
+  const pmOut = times.pmOut || '';
 
   const next = {
     timeInSlot: '',
@@ -943,8 +957,8 @@ function updateMarkAttendanceButtons() {
   if (!timeInBtn || !timeOutBtn) return;
   const next = resolveNextAttendanceSlots();
   if (next.done) {
-    timeInBtn.textContent = 'DONE';
-    timeOutBtn.textContent = 'DONE';
+    timeInBtn.textContent = 'COMPLETED';
+    timeOutBtn.textContent = 'COMPLETED';
     timeInBtn.disabled = true;
     timeOutBtn.disabled = true;
     timeInBtn.dataset.slot = '';
