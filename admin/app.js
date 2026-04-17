@@ -771,9 +771,26 @@ async function api(path, options = {}) {
 } 
 
 function normalizeOfficeScope(value) {
-  const office = String(value || '').trim();
-  if (office === 'Curriculum Implementation Division') return office;
-  if (office === 'School Governance and Operations Division') return office;
+  const raw = String(value || '').trim();
+  const office = raw.toLowerCase();
+
+  // Accept common aliases saved in older data (e.g., "CID Unit", "CID", "SGOD Unit").
+  const isCid =
+    office === 'curriculum implementation division' ||
+    office === 'cid' ||
+    office === 'cid unit' ||
+    office.includes('curriculum implementation') ||
+    office.startsWith('cid');
+
+  const isSgod =
+    office === 'school governance and operations division' ||
+    office === 'sgod' ||
+    office === 'sgod unit' ||
+    office.includes('school governance and operations') ||
+    office.startsWith('sgod');
+
+  if (isCid) return 'Curriculum Implementation Division';
+  if (isSgod) return 'School Governance and Operations Division';
   return '';
 }
 
