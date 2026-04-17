@@ -66,12 +66,14 @@ const logoutBtn = document.getElementById('logout-btn');
 
 let employeesCache = [];
 let attendanceCache = [];
-let notificationsCache = [];
-let messagesCache = [];
-let reportsCache = [];
-let reportMap = new Map();
-let reportAttestedDrafts = new Map();
-let refreshTimer = null;
+let notificationsCache = []; 
+let messagesCache = []; 
+let reportsCache = []; 
+let currentAdmin = null;
+let officeScope = '';
+let reportMap = new Map(); 
+let reportAttestedDrafts = new Map(); 
+let refreshTimer = null; 
 const STAT_CACHE_TTL = 45000;
 const statCache = {
   key: '',
@@ -320,23 +322,23 @@ function hasAnyAttendanceLocal(item) {
   );
 }
 
-async function ensureEmployeesLoaded() {
-  if (employeesCache.length) return;
-  const data = await api('/api/employees');
-  employeesCache = data.employees || [];
-}
+async function ensureEmployeesLoaded() { 
+  if (employeesCache.length) return; 
+  const data = await api(withOfficeScope('/api/employees')); 
+  employeesCache = data.employees || []; 
+} 
 
 function normalizeStatus(value) {
   return String(value || '').toLowerCase();
 }
 
-async function buildStatusList(status, from, to) {
-  const query = new URLSearchParams({ from, to }).toString();
-  const data = await api(`/api/attendance?${query}`);
-  const raw = data.attendance || [];
-  const unique = new Map();
-  raw.forEach((item) => {
-    const key = `${item.date}|${item.employeeId}`;
+async function buildStatusList(status, from, to) { 
+  const query = new URLSearchParams({ from, to }).toString(); 
+  const data = await api(withOfficeScope(`/api/attendance?${query}`)); 
+  const raw = data.attendance || []; 
+  const unique = new Map(); 
+  raw.forEach((item) => { 
+    const key = `${item.date}|${item.employeeId}`; 
     if (!unique.has(key)) unique.set(key, item);
   });
   const records = Array.from(unique.values());
@@ -386,21 +388,21 @@ function setStatModalLoading(message = 'Loading…') {
   if (statModalEmpty) statModalEmpty.classList.add('hidden');
 }
 
-async function loadStatBase(from, to, needsEmployees = false) {
-  const key = `${from}|${to}`;
-  const now = Date.now();
-  if (statCache.key === key && (now - statCache.time) < STAT_CACHE_TTL) {
-    return { attendance: statCache.attendance, employees: statCache.employees };
-  }
-  const query = new URLSearchParams({ from, to }).toString();
-  const tasks = [api(`/api/attendance?${query}`)];
-  if (needsEmployees || !employeesCache.length) {
-    tasks.push(api('/api/employees'));
-  }
-  const results = await Promise.all(tasks);
-  const attendance = (results[0] && results[0].attendance) || [];
-  let employees = employeesCache;
-  if (results[1] && results[1].employees) {
+async function loadStatBase(from, to, needsEmployees = false) { 
+  const key = `${from}|${to}`; 
+  const now = Date.now(); 
+  if (statCache.key === key && (now - statCache.time) < STAT_CACHE_TTL) { 
+    return { attendance: statCache.attendance, employees: statCache.employees }; 
+  } 
+  const query = new URLSearchParams({ from, to }).toString(); 
+  const tasks = [api(withOfficeScope(`/api/attendance?${query}`))]; 
+  if (needsEmployees || !employeesCache.length) { 
+    tasks.push(api(withOfficeScope('/api/employees'))); 
+  } 
+  const results = await Promise.all(tasks); 
+  const attendance = (results[0] && results[0].attendance) || []; 
+  let employees = employeesCache; 
+  if (results[1] && results[1].employees) { 
     employees = results[1].employees;
     employeesCache = employees;
   }
@@ -543,12 +545,12 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-async function fetchAttendanceForReport(employeeId, reportDate) {
-  if (!employeeId || !reportDate) return null;
-  const query = new URLSearchParams({ employeeId, from: reportDate, to: reportDate }).toString();
-  const data = await api(`/api/attendance?${query}`);
-  return (data.attendance || [])[0] || null;
-}
+async function fetchAttendanceForReport(employeeId, reportDate) { 
+  if (!employeeId || !reportDate) return null; 
+  const query = new URLSearchParams({ employeeId, from: reportDate, to: reportDate }).toString(); 
+  const data = await api(withOfficeScope(`/api/attendance?${query}`)); 
+  return (data.attendance || [])[0] || null; 
+} 
 
 async function openReportPrint(report) {
   if (!report) return;
@@ -742,7 +744,7 @@ async function openReportPrint(report) {
   }
 }
 
-async function api(path, options = {}) {
+async function api(path, options = {}) { 
   const method = String(options.method || 'GET').toUpperCase();
   const cacheBustedPath =
     method === 'GET'
@@ -765,23 +767,36 @@ async function api(path, options = {}) {
     error.status = res.status;
     throw error;
   }
-  return data;
+  return data; 
+} 
+
+function normalizeOfficeScope(value) {
+  const office = String(value || '').trim();
+  if (office === 'Curriculum Implementation Division') return office;
+  if (office === 'School Governance and Operations Division') return office;
+  return '';
 }
 
-async function loadSummary() {
-  const data = await api(`/api/summary?date=${isoToday()}`);
-  statTotal.textContent = data.totalEmployees;
-  statPresent.textContent = data.present;
-  statLate.textContent = data.late;
-  statAbsent.textContent = data.absent;
+function withOfficeScope(path) {
+  if (!officeScope) return path;
+  const glue = path.includes('?') ? '&' : '?';
+  return `${path}${glue}office=${encodeURIComponent(officeScope)}`;
 }
 
-async function loadAttendanceToday() {
-  const today = isoToday();
-  const [attendanceResult, reportsResult] = await Promise.allSettled([
-    api(`/api/attendance/today?date=${today}`),
-    api(`/api/reports?from=${today}&to=${today}`)
-  ]);
+async function loadSummary() { 
+  const data = await api(withOfficeScope(`/api/summary?date=${isoToday()}`)); 
+  statTotal.textContent = data.totalEmployees; 
+  statPresent.textContent = data.present; 
+  statLate.textContent = data.late; 
+  statAbsent.textContent = data.absent; 
+} 
+
+async function loadAttendanceToday() { 
+  const today = isoToday(); 
+  const [attendanceResult, reportsResult] = await Promise.allSettled([ 
+    api(withOfficeScope(`/api/attendance/today?date=${today}`)), 
+    api(withOfficeScope(`/api/reports?from=${today}&to=${today}`)) 
+  ]); 
   if (attendanceResult.status !== 'fulfilled') throw attendanceResult.reason;
   const data = attendanceResult.value;
   const reportData = reportsResult.status === 'fulfilled' ? reportsResult.value : { reports: [] };
@@ -818,12 +833,12 @@ async function loadAttendanceToday() {
   });
 }
 
-async function loadEmployees() {
-  const data = await api('/api/employees');
-  employeesCache = data.employees;
-  renderEmployees(employeesCache);
-  populateDtrEmployees();
-}
+async function loadEmployees() { 
+  const data = await api(withOfficeScope('/api/employees')); 
+  employeesCache = data.employees; 
+  renderEmployees(employeesCache); 
+  populateDtrEmployees(); 
+} 
 
 function renderEmployees(list) { 
   employeesTable.innerHTML = ''; 
@@ -860,14 +875,14 @@ async function updateEmployeePosition(employeeId, position) {
   }); 
 } 
 
-async function loadAttendanceHistory(from, to) {
-  const query = buildRangeQuery(from, to);
-  const attendancePath = query ? `/api/attendance?${query}` : '/api/attendance';
-  const reportsPath = query ? `/api/reports?${query}` : '/api/reports';
-  const [attendanceResult, reportsResult] = await Promise.allSettled([
-    api(attendancePath),
-    api(reportsPath)
-  ]);
+async function loadAttendanceHistory(from, to) { 
+  const query = buildRangeQuery(from, to); 
+  const attendancePath = withOfficeScope(query ? `/api/attendance?${query}` : '/api/attendance'); 
+  const reportsPath = withOfficeScope(query ? `/api/reports?${query}` : '/api/reports'); 
+  const [attendanceResult, reportsResult] = await Promise.allSettled([ 
+    api(attendancePath), 
+    api(reportsPath) 
+  ]); 
   if (attendanceResult.status !== 'fulfilled') throw attendanceResult.reason;
   const data = attendanceResult.value;
   const reportData = reportsResult.status === 'fulfilled' ? reportsResult.value : { reports: [] };
@@ -1013,13 +1028,13 @@ function renderReportsTable(list) {
   updateReportMap(list);
 }
 
-async function loadReportsTable(from, to) {
-  const query = buildRangeQuery(from, to);
-  const path = query ? `/api/reports?${query}` : '/api/reports';
-  const data = await api(path);
-  reportsCache = data.reports || [];
-  renderReportsTable(reportsCache);
-}
+async function loadReportsTable(from, to) { 
+  const query = buildRangeQuery(from, to); 
+  const path = withOfficeScope(query ? `/api/reports?${query}` : '/api/reports'); 
+  const data = await api(path); 
+  reportsCache = data.reports || []; 
+  renderReportsTable(reportsCache); 
+} 
 
 function syncUpdatedReportInCache(updatedReport) {
   if (!updatedReport) return;
@@ -1135,7 +1150,7 @@ async function handleEmployeesActionClick(event) {
   }
 }
 
-async function generateDtr() {
+async function generateDtr() { 
   const employeeId = dtrEmployee.value;
   const monthValue = dtrMonth.value;
   if (!employeeId || !monthValue) {
@@ -1146,9 +1161,9 @@ async function generateDtr() {
   const from = `${year}-${String(month).padStart(2, '0')}-01`;
   const toDate = new Date(year, month, 0);
   const to = `${year}-${String(month).padStart(2, '0')}-${String(toDate.getDate()).padStart(2, '0')}`;
-  const query = new URLSearchParams({ from, to, employeeId }).toString();
-  const data = await api(`/api/attendance?${query}`);
-  const list = (data.attendance || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const query = new URLSearchParams({ from, to, employeeId }).toString(); 
+  const data = await api(withOfficeScope(`/api/attendance?${query}`)); 
+  const list = (data.attendance || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date))); 
   const map = new Map(list.map((item) => [item.date, item]));
   const employee = employeesCache.find((emp) => emp.id === employeeId);
   const employeeName = employee ? employee.name : (list[0] ? list[0].employeeName : 'Employee');
@@ -1360,7 +1375,7 @@ function getOfficeFilterSet(selectedOffice) {
   return new Set(list);
 }
 
-async function generateReport() {
+async function generateReport() { 
   const monthValue = document.getElementById('report-month').value;
   const office = document.getElementById('report-office').value;
   if (!monthValue) {
@@ -1372,12 +1387,12 @@ async function generateReport() {
   const toDate = new Date(year, month, 0);
   const to = `${year}-${String(month).padStart(2, '0')}-${String(toDate.getDate()).padStart(2, '0')}`;
 
-  const query = new URLSearchParams({ from, to }).toString();
-  const data = await api(`/api/attendance?${query}`);
-  let list = data.attendance;
-  if (office) {
-    const officeSet = getOfficeFilterSet(office);
-    list = list.filter((item) => officeSet.has(item.office));
+  const query = new URLSearchParams({ from, to }).toString(); 
+  const data = await api(withOfficeScope(`/api/attendance?${query}`)); 
+  let list = data.attendance; 
+  if (office) { 
+    const officeSet = getOfficeFilterSet(office); 
+    list = list.filter((item) => officeSet.has(item.office)); 
   }
 
   reportPreview.innerHTML = '';
@@ -1590,19 +1605,31 @@ function handleReportsInputDraft(event) {
   reportAttestedDrafts.set(key, draft);
 }
 
-loginForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const formData = new FormData(loginForm);
-  const payload = Object.fromEntries(formData.entries());
-  try {
-    const username = String(payload.username || '').trim();
-    const password = String(payload.password || '').trim();
-    await api('/api/login', {
-      method: 'POST',
-      body: JSON.stringify({ role: 'admin', username, password })
-    });
-    loginScreen.classList.add('hidden');
-    adminApp.classList.remove('hidden');
+loginForm.addEventListener('submit', async (event) => { 
+  event.preventDefault(); 
+  const formData = new FormData(loginForm); 
+  const payload = Object.fromEntries(formData.entries()); 
+  try { 
+    const username = String(payload.username || '').trim(); 
+    const password = String(payload.password || '').trim(); 
+    const result = await api('/api/login', { 
+      method: 'POST', 
+      body: JSON.stringify({ role: 'admin', username, password }) 
+    }); 
+    currentAdmin = result && result.user ? result.user : null;
+    officeScope = normalizeOfficeScope(currentAdmin && currentAdmin.office);
+    const reportOfficeSelect = document.getElementById('report-office');
+    if (reportOfficeSelect && officeScope) {
+      reportOfficeSelect.value = officeScope;
+      reportOfficeSelect.disabled = true;
+    }
+    const addOfficeSelect = addEmployeeForm ? addEmployeeForm.querySelector('select[name=\"office\"]') : null;
+    if (addOfficeSelect && officeScope) {
+      addOfficeSelect.value = officeScope;
+      addOfficeSelect.disabled = true;
+    }
+    loginScreen.classList.add('hidden'); 
+    adminApp.classList.remove('hidden'); 
     const monthRange = getMonthRange();
     if (attendanceFromInput) attendanceFromInput.value = monthRange.from;
     if (attendanceToInput) attendanceToInput.value = monthRange.to;

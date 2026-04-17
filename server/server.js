@@ -2660,10 +2660,13 @@ function enrichAttendance(db, list) {
   });
 }
 
-function summaryForDate(db, date) {
-  const activeEmployees = (db.employees || []).filter(
-    (emp) => String(emp && emp.status ? emp.status : 'Active').toLowerCase() !== 'deleted'
-  );
+function summaryForDate(db, date, officeScope = '') { 
+  const scope = normalizeDivisionOfficeScope(officeScope);
+  const activeEmployees = (db.employees || []).filter((emp) => {
+    if (String(emp && emp.status ? emp.status : 'Active').toLowerCase() === 'deleted') return false;
+    if (scope && String(emp && emp.office ? emp.office : '') !== scope) return false;
+    return true;
+  }); 
   const activeEmployeeIds = new Set(activeEmployees.map((emp) => emp.id));
   const totalEmployees = activeEmployees.length;
   const todays = attendanceForDate(db, date);
@@ -2678,8 +2681,15 @@ function summaryForDate(db, date) {
     if (status === 'Late') late += 1;
     if (status === 'Present') present += 1;
   });
-  const absent = totalEmployees - attendedIds.size;
-  return { totalEmployees, present, late, absent };
+  const absent = totalEmployees - attendedIds.size; 
+  return { totalEmployees, present, late, absent }; 
+} 
+
+function normalizeDivisionOfficeScope(value) {
+  const office = String(value || '').trim();
+  if (office === 'Curriculum Implementation Division') return office;
+  if (office === 'School Governance and Operations Division') return office;
+  return '';
 }
 
 function makeId(prefix) {
@@ -3025,27 +3035,29 @@ async function handleApiPg(req, res, pathname) {
     return sendJson(res, 200, { ok: true, employees: seedEmployees.length, attendance: seedAttendance.length });
   }
 
-  if (req.method === 'GET' && pathname === '/api/summary') {
-    const query = url.parse(req.url, true).query;
-    const date = String(query.date || isoToday());
-    const totalRes = await pgQuery(
-      `SELECT COUNT(*) AS count
-       FROM employees
-       WHERE LOWER(COALESCE(status, 'Active')) <> 'deleted'`
-    );
-    const totalEmployees = Number(totalRes.rows[0].count);
-    const attendanceRes = await pgQuery(
-      `SELECT a.*
-       FROM attendance a
-       INNER JOIN employees e ON e.id = a.employee_id
-       WHERE a.date = $1
-         AND LOWER(COALESCE(e.status, 'Active')) <> 'deleted'`,
-      [date]
-    );
-    const todays = attendanceRes.rows.map(mapAttendanceRow);
-    const attendedIds = new Set();
-    let present = 0;
-    let late = 0;
+  if (req.method === 'GET' && pathname === '/api/summary') { 
+    const query = url.parse(req.url, true).query; 
+    const date = String(query.date || isoToday()); 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    const totalRes = await pgQuery( 
+      `SELECT COUNT(*) AS count 
+       FROM employees 
+       WHERE LOWER(COALESCE(status, 'Active')) <> 'deleted'${officeScope ? ' AND office = $1' : ''}` 
+      , officeScope ? [officeScope] : [] 
+    ); 
+    const totalEmployees = Number(totalRes.rows[0].count); 
+    const attendanceRes = await pgQuery( 
+      `SELECT a.* 
+       FROM attendance a 
+       INNER JOIN employees e ON e.id = a.employee_id 
+       WHERE a.date = $1 
+         AND LOWER(COALESCE(e.status, 'Active')) <> 'deleted'${officeScope ? ' AND e.office = $2' : ''}`, 
+      officeScope ? [date, officeScope] : [date] 
+    ); 
+    const todays = attendanceRes.rows.map(mapAttendanceRow); 
+    const attendedIds = new Set(); 
+    let present = 0; 
+    let late = 0; 
     todays.forEach((att) => {
       if (!hasAnyAttendance(att)) return;
       attendedIds.add(att.employeeId);
@@ -3061,10 +3073,14 @@ async function handleApiPg(req, res, pathname) {
     return sendJson(res, 200, { ok: true, time: Date.now() });
   }
 
-  if (req.method === 'GET' && pathname === '/api/employees') {
-    const result = await pgQuery('SELECT * FROM employees ORDER BY id');
-    return sendJson(res, 200, { employees: result.rows.map(mapEmployeeRow) });
-  }
+  if (req.method === 'GET' && pathname === '/api/employees') { 
+    const query = url.parse(req.url, true).query; 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    const result = officeScope
+      ? await pgQuery('SELECT * FROM employees WHERE office = $1 ORDER BY id', [officeScope])
+      : await pgQuery('SELECT * FROM employees ORDER BY id'); 
+    return sendJson(res, 200, { employees: result.rows.map(mapEmployeeRow) }); 
+  } 
 
   if (req.method === 'GET' && pathname === '/api/notifications') {
     const result = await pgQuery('SELECT * FROM notifications ORDER BY created_at DESC');
@@ -3135,23 +3151,27 @@ async function handleApiPg(req, res, pathname) {
     return sendJson(res, 200, { ok: true });
   }
 
-  if (req.method === 'GET' && pathname === '/api/reports') {
-    const query = url.parse(req.url, true).query;
-    const from = query.from || '1900-01-01';
-    const to = query.to || '2999-12-31';
-    const employeeId = query.employeeId;
-    const params = [from, to];
-    let sql =
-      `SELECT * FROM reports
-       WHERE report_date >= $1 AND report_date <= $2`;
-    if (employeeId) {
-      sql += ' AND employee_id = $3';
-      params.push(employeeId);
-    }
-    sql += ' ORDER BY report_date DESC, created_at DESC';
-    const result = await pgQuery(sql, params);
-    return sendJson(res, 200, { reports: result.rows.map(mapReportRow) });
-  }
+  if (req.method === 'GET' && pathname === '/api/reports') { 
+    const query = url.parse(req.url, true).query; 
+    const from = query.from || '1900-01-01'; 
+    const to = query.to || '2999-12-31'; 
+    const employeeId = query.employeeId; 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    const params = [from, to]; 
+    let sql = 
+      `SELECT * FROM reports 
+       WHERE report_date >= $1 AND report_date <= $2`; 
+    if (employeeId) { 
+      sql += ' AND employee_id = $3'; 
+      params.push(employeeId); 
+    } else if (officeScope) { 
+      sql += ' AND office = $3'; 
+      params.push(officeScope); 
+    } 
+    sql += ' ORDER BY report_date DESC, created_at DESC'; 
+    const result = await pgQuery(sql, params); 
+    return sendJson(res, 200, { reports: result.rows.map(mapReportRow) }); 
+  } 
 
   if (req.method === 'POST' && pathname === '/api/reports') {
     const body = await collectBody(req);
@@ -3578,17 +3598,19 @@ async function handleApiPg(req, res, pathname) {
     return sendJson(res, 200, { ok: true, user: emp, role: 'employee' });
   }
 
-  if (req.method === 'GET' && pathname === '/api/attendance/today') {
-    const query = url.parse(req.url, true).query;
-    const date = String(query.date || isoToday());
-    const result = await pgQuery(
-      `SELECT a.*, e.name AS employee_name, e.office, e.position
-       FROM attendance a
-       LEFT JOIN employees e ON e.id = a.employee_id
-       WHERE a.date = $1
-       ORDER BY a.date DESC`,
-      [date]
-    );
+  if (req.method === 'GET' && pathname === '/api/attendance/today') { 
+    const query = url.parse(req.url, true).query; 
+    const date = String(query.date || isoToday()); 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    const result = await pgQuery( 
+      `SELECT a.*, e.name AS employee_name, e.office, e.position 
+       FROM attendance a 
+       LEFT JOIN employees e ON e.id = a.employee_id 
+       WHERE a.date = $1 
+       ${officeScope ? 'AND e.office = $2' : ''} 
+       ORDER BY a.date DESC`, 
+      officeScope ? [date, officeScope] : [date] 
+    ); 
     const attendance = result.rows.map((row) => {
       const rec = mapAttendanceRow(row);
       rec.employeeName = row.employee_name || 'Unknown';
@@ -3600,23 +3622,27 @@ async function handleApiPg(req, res, pathname) {
     return sendJson(res, 200, { date, attendance });
   }
 
-  if (req.method === 'GET' && pathname === '/api/attendance') {
-    const query = url.parse(req.url, true).query;
-    const from = query.from || '1900-01-01';
-    const to = query.to || '2999-12-31';
-    const employeeId = query.employeeId;
-    const params = [from, to];
-    let sql =
-      `SELECT a.*, e.name AS employee_name, e.office, e.position
-       FROM attendance a
-       LEFT JOIN employees e ON e.id = a.employee_id
-       WHERE a.date >= $1 AND a.date <= $2`;
-    if (employeeId) {
-      sql += ' AND a.employee_id = $3';
-      params.push(employeeId);
-    }
-    sql += ' ORDER BY a.date DESC';
-    const result = await pgQuery(sql, params);
+  if (req.method === 'GET' && pathname === '/api/attendance') { 
+    const query = url.parse(req.url, true).query; 
+    const from = query.from || '1900-01-01'; 
+    const to = query.to || '2999-12-31'; 
+    const employeeId = query.employeeId; 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    const params = [from, to]; 
+    let sql = 
+      `SELECT a.*, e.name AS employee_name, e.office, e.position 
+       FROM attendance a 
+       LEFT JOIN employees e ON e.id = a.employee_id 
+       WHERE a.date >= $1 AND a.date <= $2`; 
+    if (employeeId) { 
+      sql += ' AND a.employee_id = $3'; 
+      params.push(employeeId); 
+    } else if (officeScope) { 
+      sql += ' AND e.office = $3'; 
+      params.push(officeScope); 
+    } 
+    sql += ' ORDER BY a.date DESC'; 
+    const result = await pgQuery(sql, params); 
     const attendance = result.rows.map((row) => {
       const rec = mapAttendanceRow(row);
       rec.employeeName = row.employee_name || 'Unknown';
@@ -4003,22 +4029,26 @@ async function handleApi(req, res, pathname) {
     return sendJson(res, 200, { ok: true, employees: seedEmployees.length, attendance: seedAttendance.length });
   }
 
-  if (req.method === 'GET' && pathname === '/api/summary') {
-    const db = readDb();
-    const query = url.parse(req.url, true).query;
-    const date = String(query.date || isoToday());
-    const summary = summaryForDate(db, date);
-    return sendJson(res, 200, { date, ...summary });
-  }
+  if (req.method === 'GET' && pathname === '/api/summary') { 
+    const db = readDb(); 
+    const query = url.parse(req.url, true).query; 
+    const date = String(query.date || isoToday()); 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    const summary = summaryForDate(db, date, officeScope); 
+    return sendJson(res, 200, { date, ...summary }); 
+  } 
 
   if (req.method === 'GET' && pathname === '/api/health') {
     return sendJson(res, 200, { ok: true, time: Date.now() });
   }
 
-  if (req.method === 'GET' && pathname === '/api/employees') {
-    const db = readDb();
-    return sendJson(res, 200, { employees: db.employees });
-  }
+  if (req.method === 'GET' && pathname === '/api/employees') { 
+    const db = readDb(); 
+    const query = url.parse(req.url, true).query; 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    const list = officeScope ? (db.employees || []).filter((e) => String(e.office || '') === officeScope) : (db.employees || []);
+    return sendJson(res, 200, { employees: list }); 
+  } 
 
   if (req.method === 'GET' && pathname === '/api/notifications') {
     const db = readDb();
@@ -4086,23 +4116,25 @@ async function handleApi(req, res, pathname) {
     });
   }
 
-  if (req.method === 'GET' && pathname === '/api/reports') {
-    const db = readDb();
-    const query = url.parse(req.url, true).query;
-    const from = query.from || '1900-01-01';
-    const to = query.to || '2999-12-31';
-    const employeeId = query.employeeId;
-    let list = db.reports || [];
-    list = list.filter((r) => r.reportDate >= from && r.reportDate <= to);
-    if (employeeId) list = list.filter((r) => r.employeeId === employeeId);
-    list.sort((a, b) => {
-      if (a.reportDate === b.reportDate) {
-        return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
-      }
-      return String(b.reportDate).localeCompare(String(a.reportDate));
-    });
-    return sendJson(res, 200, { reports: list });
-  }
+  if (req.method === 'GET' && pathname === '/api/reports') { 
+    const db = readDb(); 
+    const query = url.parse(req.url, true).query; 
+    const from = query.from || '1900-01-01'; 
+    const to = query.to || '2999-12-31'; 
+    const employeeId = query.employeeId; 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    let list = db.reports || []; 
+    list = list.filter((r) => r.reportDate >= from && r.reportDate <= to); 
+    if (employeeId) list = list.filter((r) => r.employeeId === employeeId); 
+    if (!employeeId && officeScope) list = list.filter((r) => String(r.office || '') === officeScope);
+    list.sort((a, b) => { 
+      if (a.reportDate === b.reportDate) { 
+        return String(b.createdAt || '').localeCompare(String(a.createdAt || '')); 
+      } 
+      return String(b.reportDate).localeCompare(String(a.reportDate)); 
+    }); 
+    return sendJson(res, 200, { reports: list }); 
+  } 
 
   if (req.method === 'POST' && pathname === '/api/reports') {
     return collectBody(req).then((body) => {
@@ -4495,25 +4527,29 @@ async function handleApi(req, res, pathname) {
     });
   }
 
-  if (req.method === 'GET' && pathname === '/api/attendance/today') {
-    const db = readDb();
-    const query = url.parse(req.url, true).query;
-    const date = String(query.date || isoToday());
-    const todays = enrichAttendance(db, attendanceForDate(db, date));
-    return sendJson(res, 200, { date, attendance: todays });
-  }
-
-  if (req.method === 'GET' && pathname === '/api/attendance') {
-    const db = readDb();
-    const query = url.parse(req.url, true).query;
-    const from = query.from || '1900-01-01';
-    const to = query.to || '2999-12-31';
-    const employeeId = query.employeeId;
-    let list = db.attendance.filter((a) => a.date >= from && a.date <= to);
-    if (employeeId) list = list.filter((a) => a.employeeId === employeeId);
-    const enriched = enrichAttendance(db, list);
-    return sendJson(res, 200, { attendance: enriched });
-  }
+  if (req.method === 'GET' && pathname === '/api/attendance/today') { 
+    const db = readDb(); 
+    const query = url.parse(req.url, true).query; 
+    const date = String(query.date || isoToday()); 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    let todays = enrichAttendance(db, attendanceForDate(db, date)); 
+    if (officeScope) todays = todays.filter((att) => String(att.office || '') === officeScope);
+    return sendJson(res, 200, { date, attendance: todays }); 
+  } 
+ 
+  if (req.method === 'GET' && pathname === '/api/attendance') { 
+    const db = readDb(); 
+    const query = url.parse(req.url, true).query; 
+    const from = query.from || '1900-01-01'; 
+    const to = query.to || '2999-12-31'; 
+    const employeeId = query.employeeId; 
+    const officeScope = normalizeDivisionOfficeScope(query.office);
+    let list = db.attendance.filter((a) => a.date >= from && a.date <= to); 
+    if (employeeId) list = list.filter((a) => a.employeeId === employeeId); 
+    let enriched = enrichAttendance(db, list); 
+    if (!employeeId && officeScope) enriched = enriched.filter((att) => String(att.office || '') === officeScope);
+    return sendJson(res, 200, { attendance: enriched }); 
+  } 
 
   if (req.method === 'POST' && pathname === '/api/attendance/timein') {
     return collectBody(req).then((body) => {
