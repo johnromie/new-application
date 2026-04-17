@@ -3200,11 +3200,11 @@ async function handleApiPg(req, res, pathname) {
     return sendJson(res, 200, { ok: true, report });
   }
 
-  if (req.method === 'POST' && pathname === '/api/employees') {
-    const body = await collectBody(req);
-    const email = normalizeEmail(body.email || '');
-    const countRes = await pgQuery('SELECT COUNT(*) AS count FROM employees');
-    const nextId = body.id || `SDO-${String(Number(countRes.rows[0].count) + 1).padStart(4, '0')}`;
+  if (req.method === 'POST' && pathname === '/api/employees') { 
+    const body = await collectBody(req); 
+    const email = normalizeEmail(body.email || ''); 
+    const countRes = await pgQuery('SELECT COUNT(*) AS count FROM employees'); 
+    const nextId = body.id || `SDO-${String(Number(countRes.rows[0].count) + 1).padStart(4, '0')}`; 
     const newEmp = {
       id: nextId,
       name: body.name || 'New Employee',
@@ -3238,14 +3238,30 @@ async function handleApiPg(req, res, pathname) {
         newEmp.otp,
         newEmp.otpExpiresAt
       ]
-    );
-    return sendJson(res, 201, { employee: newEmp });
-  }
+    ); 
+    return sendJson(res, 201, { employee: newEmp }); 
+  } 
 
-  if (req.method === 'POST' && pathname === '/api/employees/delete') {
-    const body = await collectBody(req);
-    const employeeId = String(body.id || '').trim();
-    if (!employeeId) {
+  if (req.method === 'POST' && pathname === '/api/employees/update') { 
+    const body = await collectBody(req); 
+    const employeeId = String(body.id || '').trim(); 
+    const position = String(body.position || '').trim(); 
+    if (!employeeId || !position) { 
+      return sendJson(res, 400, { ok: false, message: 'Employee id and position are required.' }); 
+    } 
+    const existing = await pgQuery('SELECT 1 FROM employees WHERE id = $1', [employeeId]); 
+    if (!existing.rows.length) { 
+      return sendJson(res, 404, { ok: false, message: 'Employee not found.' }); 
+    } 
+    await pgQuery('UPDATE employees SET position = $1 WHERE id = $2', [position, employeeId]); 
+    const updated = await pgQuery('SELECT * FROM employees WHERE id = $1', [employeeId]); 
+    return sendJson(res, 200, { ok: true, employee: mapEmployeeRow(updated.rows[0]) }); 
+  } 
+ 
+  if (req.method === 'POST' && pathname === '/api/employees/delete') { 
+    const body = await collectBody(req); 
+    const employeeId = String(body.id || '').trim(); 
+    if (!employeeId) { 
       return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
     }
     const existing = await pgQuery('SELECT * FROM employees WHERE id = $1', [employeeId]);
@@ -4159,14 +4175,32 @@ async function handleApi(req, res, pathname) {
       };
       db.employees.push(newEmp);
       writeDb(db);
-      return sendJson(res, 201, { employee: newEmp });
-    });
-  }
+      return sendJson(res, 201, { employee: newEmp }); 
+    }); 
+  } 
 
-  if (req.method === 'POST' && pathname === '/api/employees/delete') {
-    return collectBody(req).then((body) => {
-      const db = readDb();
-      const employeeId = String(body.id || '').trim();
+  if (req.method === 'POST' && pathname === '/api/employees/update') { 
+    return collectBody(req).then((body) => { 
+      const db = readDb(); 
+      const employeeId = String(body.id || '').trim(); 
+      const position = String(body.position || '').trim(); 
+      if (!employeeId || !position) { 
+        return sendJson(res, 400, { ok: false, message: 'Employee id and position are required.' }); 
+      } 
+      const employee = db.employees.find((e) => e.id === employeeId); 
+      if (!employee) { 
+        return sendJson(res, 404, { ok: false, message: 'Employee not found.' }); 
+      } 
+      employee.position = position; 
+      writeDb(db); 
+      return sendJson(res, 200, { ok: true, employee }); 
+    }); 
+  } 
+ 
+  if (req.method === 'POST' && pathname === '/api/employees/delete') { 
+    return collectBody(req).then((body) => { 
+      const db = readDb(); 
+      const employeeId = String(body.id || '').trim(); 
       if (!employeeId) {
         return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
       }

@@ -825,30 +825,40 @@ async function loadEmployees() {
   populateDtrEmployees();
 }
 
-function renderEmployees(list) {
-  employeesTable.innerHTML = '';
-  list.forEach((emp) => {
-    const statusValue = normalizeEmployeeStatus(emp.status);
-    const deleted = statusValue.toLowerCase() === 'deleted';
-    const actionLabel = deleted ? 'Restore' : 'Delete';
-    const actionType = deleted ? 'restore' : 'delete';
-    const actionClass = deleted ? 'table-action-btn' : 'table-action-btn danger';
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td>${emp.id}</td>
-      <td>${emp.name}</td>
-      <td>${emp.position}</td>
-      <td>${emp.office}</td>
-      <td>${statusValue}</td>
-      <td>
-        <button class="${actionClass}" data-employee-action="${actionType}" data-employee-id="${emp.id}">
-          ${actionLabel}
+function renderEmployees(list) { 
+  employeesTable.innerHTML = ''; 
+  list.forEach((emp) => { 
+    const statusValue = normalizeEmployeeStatus(emp.status); 
+    const deleted = statusValue.toLowerCase() === 'deleted'; 
+    const actionLabel = deleted ? 'Restore' : 'Delete'; 
+    const actionType = deleted ? 'restore' : 'delete'; 
+    const actionClass = deleted ? 'table-action-btn' : 'table-action-btn danger'; 
+    const row = document.createElement('tr'); 
+    row.innerHTML = ` 
+      <td>${emp.id}</td> 
+      <td>${emp.name}</td> 
+      <td> 
+        <span>${escapeHtml(String(emp.position || ''))}</span> 
+        <button class="table-action-btn ghost" data-edit-position="${emp.id}" type="button">Edit</button> 
+      </td> 
+      <td>${emp.office}</td> 
+      <td>${statusValue}</td> 
+      <td> 
+        <button class="${actionClass}" data-employee-action="${actionType}" data-employee-id="${emp.id}"> 
+          ${actionLabel} 
         </button>
       </td>
     `;
-    employeesTable.appendChild(row);
-  });
-}
+    employeesTable.appendChild(row); 
+  }); 
+} 
+
+async function updateEmployeePosition(employeeId, position) { 
+  return api('/api/employees/update', { 
+    method: 'POST', 
+    body: JSON.stringify({ id: employeeId, position }) 
+  }); 
+} 
 
 async function loadAttendanceHistory(from, to) {
   const query = buildRangeQuery(from, to);
@@ -1086,12 +1096,34 @@ async function updateEmployeeStatus(employeeId, actionType) {
   });
 }
 
-async function handleEmployeesActionClick(event) {
-  const button = event.target.closest('[data-employee-action]');
-  if (!button) return;
-  const actionType = String(button.dataset.employeeAction || '').trim();
-  const employeeId = String(button.dataset.employeeId || '').trim();
-  if (!employeeId || !actionType) return;
+async function handleEmployeesActionClick(event) { 
+  const editBtn = event.target.closest('[data-edit-position]'); 
+  if (editBtn) { 
+    const employeeId = String(editBtn.dataset.editPosition || '').trim(); 
+    if (!employeeId) return; 
+    const employee = employeesCache.find((emp) => emp.id === employeeId); 
+    const currentPosition = employee ? String(employee.position || '').trim() : ''; 
+    const nextPosition = window.prompt(`Edit position for ${employeeId}:`, currentPosition); 
+    if (nextPosition === null) return; 
+    const position = String(nextPosition || '').trim(); 
+    if (!position) { 
+      alert('Position is required.'); 
+      return; 
+    } 
+    try { 
+      await updateEmployeePosition(employeeId, position); 
+      await loadEmployees(); 
+    } catch (err) { 
+      alert(err.message || 'Unable to update position.'); 
+    } 
+    return; 
+  } 
+ 
+  const button = event.target.closest('[data-employee-action]'); 
+  if (!button) return; 
+  const actionType = String(button.dataset.employeeAction || '').trim(); 
+  const employeeId = String(button.dataset.employeeId || '').trim(); 
+  if (!employeeId || !actionType) return; 
   const label = actionType === 'restore' ? 'restore' : 'delete';
   const confirmed = window.confirm(`Are you sure you want to ${label} employee ${employeeId}?`);
   if (!confirmed) return;
