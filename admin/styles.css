@@ -660,6 +660,13 @@ body::before {
   border: 1px solid #d8e1f5;
 }
 
+.filters select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #d8e1f5;
+  background: #fff;
+}
+
 .form-grid {
   display: grid;
   gap: 16px;

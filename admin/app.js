@@ -29,6 +29,7 @@ const attendanceToInput = document.getElementById('attendance-to');
 const reportsTable = document.getElementById('reports-table').querySelector('tbody');
 const reportsFrom = document.getElementById('reports-from');
 const reportsTo = document.getElementById('reports-to');
+const reportsOfficeFilter = document.getElementById('reports-office');
 const filterReportsBtn = document.getElementById('filter-reports');
 const refreshReportsBtn = document.getElementById('refresh-reports');
 const dtrEmployee = document.getElementById('dtr-employee');
@@ -1054,7 +1055,18 @@ function renderReportsTable(list) {
 }
 
 async function loadReportsTable(from, to) { 
-  const query = buildRangeQuery(from, to); 
+  let query = buildRangeQuery(from, to); 
+
+  // Super admin can filter by office; CID/SGOD scoped admins are already filtered by officeScope.
+  if (!officeScope && reportsOfficeFilter) {
+    const selectedOffice = String(reportsOfficeFilter.value || '').trim();
+    if (selectedOffice) {
+      const params = new URLSearchParams(query);
+      params.set('office', selectedOffice);
+      query = params.toString();
+    }
+  }
+
   const path = withOfficeScope(query ? `/api/reports?${query}` : '/api/reports'); 
   const data = await api(path); 
   reportsCache = data.reports || []; 
@@ -1638,6 +1650,10 @@ loginForm.addEventListener('submit', async (event) => {
       reportOfficeSelect.value = officeScope;
       reportOfficeSelect.disabled = true;
     }
+    if (reportsOfficeFilter && officeScope) {
+      reportsOfficeFilter.value = officeScope;
+      reportsOfficeFilter.disabled = true;
+    }
     const addOfficeSelect = addEmployeeForm ? addEmployeeForm.querySelector('select[name=\"office\"]') : null;
     if (addOfficeSelect && officeScope) {
       addOfficeSelect.value = officeScope;
@@ -1748,6 +1764,14 @@ if (filterReportsBtn) {
   filterReportsBtn.addEventListener('click', () => {
     const from = reportsFrom.value;
     const to = reportsTo.value;
+    loadReportsTable(from, to);
+  });
+}
+
+if (reportsOfficeFilter) {
+  reportsOfficeFilter.addEventListener('change', () => {
+    const from = (reportsFrom && reportsFrom.value) || '';
+    const to = (reportsTo && reportsTo.value) || '';
     loadReportsTable(from, to);
   });
 }
