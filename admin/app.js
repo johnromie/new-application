@@ -838,9 +838,9 @@ async function loadAttendanceToday() {
       <td class="status-cell status-pm-in">${slotStatuses.pmIn}</td>
       <td>${times.pmOut || '--'}</td>
       <td class="status-cell status-pm-out">${slotStatuses.pmOut}</td>
-      <td>
-        ${report ? `<button class="table-action-btn" data-report="${report.id}" data-employee="${item.employeeId}" data-date="${item.date}">Print Report</button>` : '--'}
-      </td>
+      <td> 
+        ${report ? `<button class="table-action-btn" data-report="${report.id}" data-employee="${item.employeeId}" data-date="${item.date}">Print Report</button>` : 'No report has been attached yet'} 
+      </td> 
     `;
     setStatusCell(row.querySelector('.status-am-in'), slotStatuses.amIn);
     setStatusCell(row.querySelector('.status-am-out'), slotStatuses.amOut);
@@ -923,9 +923,9 @@ async function loadAttendanceHistory(from, to) {
       <td class="status-cell status-pm-in">${slotStatuses.pmIn}</td>
       <td>${times.pmOut || '--'}</td>
       <td class="status-cell status-pm-out">${slotStatuses.pmOut}</td>
-      <td>
-        ${report ? `<button class="table-action-btn" data-report="${report.id}" data-employee="${item.employeeId}" data-date="${item.date}">Print Report</button>` : '--'}
-      </td>
+      <td> 
+        ${report ? `<button class="table-action-btn" data-report="${report.id}" data-employee="${item.employeeId}" data-date="${item.date}">Print Report</button>` : 'No report has been attached yet'} 
+      </td> 
     `;
     setStatusCell(row.querySelector('.status-am-in'), slotStatuses.amIn);
     setStatusCell(row.querySelector('.status-am-out'), slotStatuses.amOut);
