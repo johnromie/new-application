@@ -992,24 +992,15 @@ function updateMarkAttendanceButtons() {
   const pmInDone = !!times.pmIn; 
   const pmOutDone = !!times.pmOut; 
 
-  const minutesNow = getMinutesNowLocal();
-  const allowPm = minutesNow >= 13 * 60; // after 1:00 PM
-
   // Always show 4 buttons; enable only the next valid action.
-  // Recorded buttons stay clickable so they can show "already recorded" notice.
+  // Per requirement: allow users to tap AM/PM time in/out anytime.
+  // If the slot is already recorded, the button will show an "already recorded" notice.
   setAttendanceButtonState(timeInAmBtn, true); 
-  setAttendanceButtonState(timeOutAmBtn, amInDone && (!amOutDone || amOutDone)); 
-
-  // PM time-in only after AM out AND after 1:00 PM.
-  setAttendanceButtonState(timeInPmBtn, (amInDone && amOutDone && allowPm) || pmInDone); 
-  setAttendanceButtonState(timeOutPmBtn, pmInDone && (!pmOutDone || pmOutDone)); 
-
-  // Small UX hint when PM is not yet available.
-  if (amInDone && amOutDone && !pmInDone && !allowPm) {
-    setAttendanceNotice('Time In (PM) will be available after 1:00 PM.', 'loading');
-  }
+  setAttendanceButtonState(timeOutAmBtn, true); 
+  setAttendanceButtonState(timeInPmBtn, true); 
+  setAttendanceButtonState(timeOutPmBtn, true); 
 } 
-
+ 
 async function handleTimeInClick(slot, sourceBtn) {
   const safeSlot = slot === 'PM' ? 'PM' : 'AM';
   const times = getTodaySlotTimes();
@@ -1021,18 +1012,6 @@ async function handleTimeInClick(slot, sourceBtn) {
   if (safeSlot === 'PM' && times.pmIn) {
     showAlreadyRecordedNotice('timein', 'PM', times.pmIn);
     return;
-  }
-
-  if (safeSlot === 'PM') {
-    const minutesNow = getMinutesNowLocal();
-    if (minutesNow < 13 * 60) {
-      showAttendanceBlocked('Time In (PM) is available after 1:00 PM.');
-      return;
-    }
-    if (!times.amIn || !times.amOut) {
-      showAttendanceBlocked('Please complete Time In/Out (AM) first.');
-      return;
-    }
   }
 
   await markTimeIn(safeSlot, sourceBtn);
@@ -1048,15 +1027,6 @@ async function handleTimeOutClick(slot, sourceBtn) {
   }
   if (safeSlot === 'PM' && times.pmOut) {
     showAlreadyRecordedNotice('timeout', 'PM', times.pmOut);
-    return;
-  }
-
-  if (safeSlot === 'AM' && !times.amIn) {
-    showAttendanceBlocked('Please record Time In (AM) first.');
-    return;
-  }
-  if (safeSlot === 'PM' && !times.pmIn) {
-    showAttendanceBlocked('Please record Time In (PM) first.');
     return;
   }
 
