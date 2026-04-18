@@ -2693,6 +2693,8 @@ function normalizeDivisionOfficeScope(value) {
   const raw = String(value || '').trim();
   const office = raw.toLowerCase();
 
+  if (!raw) return '';
+
   const isCid =
     office === 'curriculum implementation division' ||
     office === 'cid' ||
@@ -2709,7 +2711,28 @@ function normalizeDivisionOfficeScope(value) {
 
   if (isCid) return 'Curriculum Implementation Division';
   if (isSgod) return 'School Governance and Operations Division';
-  return '';
+
+  // Canonicalize common office labels to match saved values in DB.
+  const canonicalMap = {
+    'office of the sds': 'Office of the SDS',
+    'office of the asds': 'Office of the ASDS',
+    'legal unit': 'Legal Unit',
+    'ict unit': 'ICT Unit',
+    'administrative unit': 'Administrative Unit',
+    'personnel section': 'Personnel Section',
+    'supply section': 'Supply Section',
+    'cash section': 'Cash Section',
+    'records section': 'Records Section',
+    'procurement section': 'Procurement Section',
+    'curriculum implementation division': 'Curriculum Implementation Division',
+    'school governance and operations division': 'School Governance and Operations Division',
+    'accounting section': 'Accounting Section',
+    'budget section': 'Budget Section'
+  };
+  if (canonicalMap[office]) return canonicalMap[office];
+
+  // Fallback: allow exact office filtering for any other saved values.
+  return raw;
 }
 
 function isFridayInManila(dateStr) {
