@@ -124,15 +124,21 @@ function getMonthRange() {
   return { from, to };
 }
 
-function buildDateList(from, to) {
-  const dates = [];
-  const start = new Date(`${from}T00:00:00`);
-  const end = new Date(`${to}T00:00:00`);
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    dates.push(dateStr);
-  }
-  return dates;
+function buildDateList(from, to) { 
+  const dates = []; 
+  const start = new Date(`${from}T00:00:00`); 
+  const end = new Date(`${to}T00:00:00`); 
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) { 
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; 
+    dates.push(dateStr); 
+  } 
+  return dates; 
+} 
+
+function isFridayDate(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(`${dateStr}T12:00:00`);
+  return d.getDay() === 5;
 }
 
 function formatDateTimeStamp(value) {
@@ -355,16 +361,17 @@ async function buildStatusList(status, from, to) {
       .sort((a, b) => a.date.localeCompare(b.date) || a.employeeName.localeCompare(b.employeeName));
   }
 
-  await ensureEmployeesLoaded();
-  const activeEmployees = activeEmployeesFromCache();
-  if (!activeEmployees.length) return [];
-  const seen = new Set(records.map((item) => `${item.date}|${item.employeeId}`));
-  const dates = buildDateList(from, to);
-  const list = [];
-  dates.forEach((date) => {
-    activeEmployees.forEach((emp) => {
-      if (!seen.has(`${date}|${emp.id}`)) {
-        list.push({
+  await ensureEmployeesLoaded(); 
+  const activeEmployees = activeEmployeesFromCache(); 
+  if (!activeEmployees.length) return []; 
+  const seen = new Set(records.map((item) => `${item.date}|${item.employeeId}`)); 
+  // Attendance system is used every Friday; compute absences only for scheduled Fridays.
+  const dates = buildDateList(from, to).filter(isFridayDate); 
+  const list = []; 
+  dates.forEach((date) => { 
+    activeEmployees.forEach((emp) => { 
+      if (!seen.has(`${date}|${emp.id}`)) { 
+        list.push({ 
           date,
           employeeName: emp.name,
           office: emp.office,
@@ -434,15 +441,16 @@ function buildStatusListFromBase(status, from, to, attendance, employees) {
       .sort((a, b) => a.date.localeCompare(b.date) || a.employeeName.localeCompare(b.employeeName));
   }
 
-  const activeEmployees = (employees || []).filter((emp) => !isDeletedEmployee(emp));
-  if (!activeEmployees.length) return [];
-  const seen = new Set(records.map((item) => `${item.date}|${item.employeeId}`));
-  const dates = buildDateList(from, to);
-  const list = [];
-  dates.forEach((date) => {
-    activeEmployees.forEach((emp) => {
-      if (!seen.has(`${date}|${emp.id}`)) {
-        list.push({
+  const activeEmployees = (employees || []).filter((emp) => !isDeletedEmployee(emp)); 
+  if (!activeEmployees.length) return []; 
+  const seen = new Set(records.map((item) => `${item.date}|${item.employeeId}`)); 
+  // Attendance system is used every Friday; compute absences only for scheduled Fridays.
+  const dates = buildDateList(from, to).filter(isFridayDate); 
+  const list = []; 
+  dates.forEach((date) => { 
+    activeEmployees.forEach((emp) => { 
+      if (!seen.has(`${date}|${emp.id}`)) { 
+        list.push({ 
           date,
           employeeName: emp.name,
           office: emp.office,
@@ -1193,35 +1201,25 @@ async function generateDtr() {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const rec = map.get(dateStr);
     const hasAttendance = hasAnyAttendanceLocal(rec);
-    const dayOfWeek = new Date(year, month - 1, day).getDay();
-    const weekendLabel = dayOfWeek === 0 ? 'Sun' : (dayOfWeek === 6 ? 'Sat' : '');
-
-    if (!hasAttendance) {
-      if (weekendLabel) {
-        rows.push(`
-          <tr>
-            <td class="center">${day}</td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td class="center weekend">${weekendLabel}</td>
-          </tr>
-        `);
-      } else {
-        rows.push(`
-          <tr>
-            <td class="center">${day}</td>
-            <td colspan="4" class="center absent">ABSENT</td>
-            <td></td>
-            <td></td>
-          </tr>
-        `);
-      }
-      continue;
-    }
-
+    const dayOfWeek = new Date(year, month - 1, day).getDay(); 
+    const weekendLabel = dayOfWeek === 0 ? 'Sun' : (dayOfWeek === 6 ? 'Sat' : ''); 
+ 
+    if (!hasAttendance) { 
+      // Requirement: do not mark ABSENT; keep rows blank when no attendance.
+      rows.push(` 
+        <tr> 
+          <td class="center">${day}</td> 
+          <td></td> 
+          <td></td> 
+          <td></td> 
+          <td></td> 
+          <td></td> 
+          <td class="center">${weekendLabel}</td> 
+        </tr> 
+      `); 
+      continue; 
+    } 
+ 
     rows.push(`
       <tr>
         <td class="center">${day}</td>

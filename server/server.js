@@ -2667,13 +2667,17 @@ function summaryForDate(db, date, officeScope = '') {
     if (scope && String(emp && emp.office ? emp.office : '') !== scope) return false;
     return true;
   }); 
-  const activeEmployeeIds = new Set(activeEmployees.map((emp) => emp.id));
-  const totalEmployees = activeEmployees.length;
-  const todays = attendanceForDate(db, date);
-  const attendedIds = new Set();
-  let present = 0;
-  let late = 0;
-  todays.forEach((att) => {
+  const activeEmployeeIds = new Set(activeEmployees.map((emp) => emp.id)); 
+  const totalEmployees = activeEmployees.length; 
+  // System is used every Friday; do not count absences for other days.
+  if (!isFridayInManila(date)) {
+    return { totalEmployees, present: 0, late: 0, absent: 0 };
+  }
+  const todays = attendanceForDate(db, date); 
+  const attendedIds = new Set(); 
+  let present = 0; 
+  let late = 0; 
+  todays.forEach((att) => { 
     if (!activeEmployeeIds.has(att.employeeId)) return;
     if (!hasAnyAttendance(att)) return;
     attendedIds.add(att.employeeId);
@@ -2706,6 +2710,18 @@ function normalizeDivisionOfficeScope(value) {
   if (isCid) return 'Curriculum Implementation Division';
   if (isSgod) return 'School Governance and Operations Division';
   return '';
+}
+
+function isFridayInManila(dateStr) {
+  if (!dateStr) return false;
+  try {
+    // Use a stable instant (00:00Z) then format in Asia/Manila to get the local weekday.
+    const d = new Date(`${String(dateStr).slice(0, 10)}T00:00:00Z`);
+    const weekday = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'Asia/Manila' }).format(d);
+    return weekday === 'Fri';
+  } catch (err) {
+    return false;
+  }
 }
 
 function makeId(prefix) {
@@ -3060,12 +3076,16 @@ async function handleApiPg(req, res, pathname) {
        FROM employees 
        WHERE LOWER(COALESCE(status, 'Active')) <> 'deleted'${officeScope ? ' AND office = $1' : ''}` 
       , officeScope ? [officeScope] : [] 
-    ); 
-    const totalEmployees = Number(totalRes.rows[0].count); 
-    const attendanceRes = await pgQuery( 
-      `SELECT a.* 
-       FROM attendance a 
-       INNER JOIN employees e ON e.id = a.employee_id 
+    );  
+    const totalEmployees = Number(totalRes.rows[0].count);  
+    // System is used every Friday; do not count absences for other days.
+    if (!isFridayInManila(date)) {
+      return sendJson(res, 200, { date, totalEmployees, present: 0, late: 0, absent: 0 });
+    }
+    const attendanceRes = await pgQuery(  
+      `SELECT a.*  
+       FROM attendance a  
+       INNER JOIN employees e ON e.id = a.employee_id  
        WHERE a.date = $1 
          AND LOWER(COALESCE(e.status, 'Active')) <> 'deleted'${officeScope ? ' AND e.office = $2' : ''}`, 
       officeScope ? [date, officeScope] : [date] 

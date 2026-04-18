@@ -1636,26 +1636,36 @@ async function loadAttendance() {
   updateMarkAttendanceButtons();
 }
 
-function computeStats() {
-  const now = new Date();
-  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const monthRecords = attendanceCache.filter((item) => item.date && item.date.startsWith(monthKey));
-  const byDate = new Map();
-  monthRecords.forEach((item) => {
-    if (!byDate.has(item.date)) byDate.set(item.date, item);
-  });
+function computeStats() { 
+  const now = new Date(); 
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`; 
+  const monthRecords = attendanceCache.filter((item) => item.date && item.date.startsWith(monthKey)); 
+  const byDate = new Map(); 
+  monthRecords.forEach((item) => { 
+    if (!byDate.has(item.date)) byDate.set(item.date, item); 
+  }); 
 
-  const records = Array.from(byDate.values());
-  const attended = records.filter(hasAttendance);
-  const totalDays = attended.length;
-  const lateCount = attended.filter((rec) => isLateMorning(rec) || isLateAfternoon(rec)).length;
-  const daysSoFar = now.getDate();
-  const absent = Math.max(daysSoFar - totalDays, 0);
+  const records = Array.from(byDate.values()); 
+  const attended = records.filter(hasAttendance); 
+  const totalDays = attended.length; 
+  const lateCount = attended.filter((rec) => isLateMorning(rec) || isLateAfternoon(rec)).length; 
+  // Attendance system is used every Friday; compute absences only for scheduled Fridays.
+  const isFridayLocal = (dateStr) => { 
+    if (!dateStr) return false; 
+    const d = new Date(`${dateStr}T12:00:00`); 
+    return d.getDay() === 5; 
+  }; 
+  const scheduledDates = buildMonthDates().filter(isFridayLocal); 
+  const attendedFridayCount = scheduledDates.filter((date) => { 
+    const rec = byDate.get(date); 
+    return rec && hasAttendance(rec); 
+  }).length; 
+  const absent = Math.max(scheduledDates.length - attendedFridayCount, 0); 
 
-  statDays.textContent = totalDays;
-  statLate.textContent = lateCount;
-  statAbsent.textContent = absent;
-}
+  statDays.textContent = totalDays; 
+  statLate.textContent = lateCount; 
+  statAbsent.textContent = absent; 
+} 
 
 function buildMonthDates() {
   const now = new Date();
@@ -1670,7 +1680,7 @@ function buildMonthDates() {
   return dates;
 }
 
-function buildEmployeeStatusList(type) {
+function buildEmployeeStatusList(type) { 
   const now = new Date();
   const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const monthRecords = attendanceCache.filter((item) => item.date && item.date.startsWith(monthKey));
@@ -1678,14 +1688,19 @@ function buildEmployeeStatusList(type) {
   monthRecords.forEach((item) => {
     if (!byDate.has(item.date)) byDate.set(item.date, item);
   });
-  const records = Array.from(byDate.values()).filter(hasAttendance);
-  const lateRecords = records.filter((rec) => isLateMorning(rec) || isLateAfternoon(rec));
-  const allDates = buildMonthDates();
-
-  if (type === 'late') return lateRecords;
-  if (type === 'present') return records;
-
-  return allDates
+  const records = Array.from(byDate.values()).filter(hasAttendance); 
+  const lateRecords = records.filter((rec) => isLateMorning(rec) || isLateAfternoon(rec)); 
+  const isFridayLocal = (dateStr) => { 
+    if (!dateStr) return false; 
+    const d = new Date(`${dateStr}T12:00:00`); 
+    return d.getDay() === 5; 
+  }; 
+  const allDates = buildMonthDates().filter(isFridayLocal); 
+ 
+  if (type === 'late') return lateRecords; 
+  if (type === 'present') return records; 
+ 
+  return allDates 
     .filter((date) => !byDate.has(date) || !hasAttendance(byDate.get(date)))
     .map((date) => ({ date, status: 'Absent' }));
 }
