@@ -1019,20 +1019,24 @@ function updateMarkAttendanceButtons() {
   if (!timeInBtn || !timeOutBtn) return;
   const next = computeNextTwoButtonAttendanceAction();
 
+  // Always keep the button labels consistent; notifications will tell the user
+  // which session was recorded (AM/PM) and whether they are done for the day.
+  timeInBtn.textContent = 'TIME IN';
+  timeOutBtn.textContent = 'TIME OUT';
+
   if (next.action === 'done') {
-    timeInBtn.textContent = 'COMPLETED';
-    timeOutBtn.textContent = 'COMPLETED';
     setAttendanceButtonState(timeInBtn, false);
     setAttendanceButtonState(timeOutBtn, false);
+
+    // Show completion notice once per day (avoid spamming on every refresh).
+    const today = isoToday();
+    const key = `attendanceCompletedNotice:${today}`;
+    if (!sessionStorage.getItem(key)) {
+      sessionStorage.setItem(key, '1');
+      setAttendanceNotice('Attendance completed for today.', 'success');
+    }
     return;
   }
-
-  const timeInLabel = `TIME IN (${next.action === 'timein' ? next.slot : (next.slot === 'PM' ? 'PM' : 'AM')})`;
-  const timeOutLabel = `TIME OUT (${next.action === 'timeout' ? next.slot : (next.slot === 'PM' ? 'PM' : 'AM')})`;
-
-  // Show which slot will be recorded, even though only 2 buttons are visible.
-  timeInBtn.textContent = next.action === 'timein' ? timeInLabel : 'TIME IN';
-  timeOutBtn.textContent = next.action === 'timeout' ? timeOutLabel : 'TIME OUT';
 
   setAttendanceButtonState(timeInBtn, next.action === 'timein');
   setAttendanceButtonState(timeOutBtn, next.action === 'timeout');
