@@ -952,6 +952,52 @@ function normalizeAttendanceRecord(record) {
     normalized.timeOutAM = '';
   }
 
+  // De-duplicate common bad data: PM fields accidentally copied from AM fields.
+  if (normalized.timeInAM && normalized.timeInPM && String(normalized.timeInAM) === String(normalized.timeInPM)) {
+    normalized.timeInPM = '';
+  }
+  if (normalized.timeOutAM && normalized.timeOutPM && String(normalized.timeOutAM) === String(normalized.timeOutPM)) {
+    normalized.timeOutPM = '';
+  }
+
+  // Fix mis-taps / legacy issues where PM fields contain AM times.
+  // Note: PM time-in before 1:00 PM is allowed only when it happens after AM out.
+  const amOutMin = timeToMinutes(normalized.timeOutAM);
+  let pmInMin = timeToMinutes(normalized.timeInPM);
+  if (pmInMin !== null && pmInMin < PM_IN_START) {
+    const isValidEarlyPmIn = amOutMin !== null && amOutMin <= pmInMin;
+    if (!isValidEarlyPmIn) {
+      if (!normalized.timeInAM) {
+        normalized.timeInAM = normalized.timeInPM;
+      }
+      normalized.timeInPM = '';
+      pmInMin = null;
+    }
+  }
+
+  let pmOutMin = timeToMinutes(normalized.timeOutPM);
+  if (normalized.timeOutPM) {
+    // If there's a PM out but no PM in, it's almost certainly wrong.
+    if (!normalized.timeInPM) {
+      if (!normalized.timeOutAM && pmOutMin !== null && pmOutMin < PM_IN_START) {
+        normalized.timeOutAM = normalized.timeOutPM;
+      }
+      normalized.timeOutPM = '';
+      pmOutMin = null;
+    } else if (pmOutMin !== null && pmOutMin < PM_IN_START) {
+      const pmInMin2 = timeToMinutes(normalized.timeInPM);
+      const isValidEarlyPmOut =
+        amOutMin !== null &&
+        pmInMin2 !== null &&
+        amOutMin <= pmInMin2 &&
+        pmInMin2 <= pmOutMin;
+      if (!isValidEarlyPmOut) {
+        if (!normalized.timeOutAM) normalized.timeOutAM = normalized.timeOutPM;
+        normalized.timeOutPM = '';
+      }
+    }
+  }
+
   return normalized;
 }
 
