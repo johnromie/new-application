@@ -977,14 +977,18 @@ function normalizeAttendanceRecord(record) {
 
   let pmOutMin = timeToMinutes(normalized.timeOutPM);
   if (normalized.timeOutPM) {
-    // If there's a PM out but no PM in, it's almost certainly wrong.
+    // If there's a PM out but no PM in:
+    // - before 1:00 PM, treat it as a mis-tap / AM out
+    // - 1:00 PM onwards, keep it (requirement: allow time-out even when time-in is missing)
     if (!normalized.timeInPM) {
-      if (!normalized.timeOutAM && pmOutMin !== null && pmOutMin < PM_IN_START) {
-        normalized.timeOutAM = normalized.timeOutPM;
+      if (pmOutMin !== null && pmOutMin < PM_IN_START) {
+        if (!normalized.timeOutAM) normalized.timeOutAM = normalized.timeOutPM;
+        normalized.timeOutPM = '';
+        pmOutMin = null;
       }
-      normalized.timeOutPM = '';
-      pmOutMin = null;
-    } else if (pmOutMin !== null && pmOutMin < PM_IN_START) {
+    }
+
+    if (normalized.timeOutPM && pmOutMin !== null && pmOutMin < PM_IN_START) {
       const pmInMin2 = timeToMinutes(normalized.timeInPM);
       const isValidEarlyPmOut =
         amOutMin !== null &&

@@ -204,8 +204,35 @@ function buildAttendanceSlotTimes(item) {
     pmIn: item.timeInPM || '',
     pmOut: item.timeOutPM || ''
   };
-  if (!values.amIn && item.timeIn && !values.pmIn) values.amIn = item.timeIn;
-  if (!values.pmOut && item.timeOut) values.pmOut = item.timeOut;
+
+  // Fix bad/mis-tapped legacy data where PM fields were saved with AM times.
+  // If PM time is earlier than 1:00 PM, treat it as AM when AM slot is empty.
+  const PM_START_MINUTES = 13 * 60;
+  const pmInMinutes = timeToMinutes(values.pmIn);
+  if (values.pmIn && pmInMinutes !== null && pmInMinutes < PM_START_MINUTES && !values.amIn) {
+    values.amIn = values.pmIn;
+    values.pmIn = '';
+  }
+  const pmOutMinutes = timeToMinutes(values.pmOut);
+  if (values.pmOut && pmOutMinutes !== null && pmOutMinutes < PM_START_MINUTES && !values.amOut) {
+    values.amOut = values.pmOut;
+    values.pmOut = '';
+  }
+
+  // Legacy compatibility: some records only have timeIn/timeOut (no AM/PM split).
+  // Classify by time of day to avoid treating an AM out as a PM out.
+  if (!values.amIn && item.timeIn && !values.pmIn) {
+    const minutes = timeToMinutes(item.timeIn);
+    if (minutes !== null && minutes >= PM_START_MINUTES) values.pmIn = item.timeIn;
+    else values.amIn = item.timeIn;
+  }
+
+  if (!values.amOut && item.timeOut && !values.pmOut) {
+    const minutes = timeToMinutes(item.timeOut);
+    if (minutes !== null && minutes >= PM_START_MINUTES) values.pmOut = item.timeOut;
+    else values.amOut = item.timeOut;
+  }
+
   return values;
 }
 
@@ -576,10 +603,11 @@ async function openReportPrint(report) {
   const employeePosition = emp.position || 'Staff';
   const employeeOffice = emp.office || report.office || '';
   const reportDate = report.reportDate || '--';
-  const timeInAM = attendanceRecord ? (attendanceRecord.timeInAM || attendanceRecord.timeIn || '--') : '--';
-  const timeOutAM = attendanceRecord ? (attendanceRecord.timeOutAM || '--') : '--';
-  const timeInPM = attendanceRecord ? (attendanceRecord.timeInPM || '--') : '--';
-  const timeOutPM = attendanceRecord ? (attendanceRecord.timeOutPM || attendanceRecord.timeOut || '--') : '--';
+  const attTimes = attendanceRecord ? buildAttendanceSlotTimes(attendanceRecord) : { amIn: '', amOut: '', pmIn: '', pmOut: '' };
+  const timeInAM = attTimes.amIn || '--';
+  const timeOutAM = attTimes.amOut || '--';
+  const timeInPM = attTimes.pmIn || '--';
+  const timeOutPM = attTimes.pmOut || '--';
   const attestedBy = String(report.attestedBy || '').trim() || '______________________________';
   const attestedPosition = String(report.attestedPosition || '').trim() || '______________________________';
   const summaryHtml = escapeHtml(report.summary || '').replace(/\n/g, '<br>');
@@ -1231,14 +1259,15 @@ async function generateDtr() {
       `); 
       continue; 
     } 
- 
+
+    const times = buildAttendanceSlotTimes(rec || {});
     rows.push(`
       <tr>
         <td class="center">${day}</td>
-        <td class="center">${rec.timeInAM || rec.timeIn || ''}</td>
-        <td class="center">${rec.timeOutAM || ''}</td>
-        <td class="center">${rec.timeInPM || ''}</td>
-        <td class="center">${rec.timeOutPM || rec.timeOut || ''}</td>
+        <td class="center">${times.amIn || ''}</td>
+        <td class="center">${times.amOut || ''}</td>
+        <td class="center">${times.pmIn || ''}</td>
+        <td class="center">${times.pmOut || ''}</td>
         <td></td>
         <td class="center">${weekendLabel}</td>
       </tr>
