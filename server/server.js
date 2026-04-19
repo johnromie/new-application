@@ -3833,6 +3833,10 @@ async function handleApiPg(req, res, pathname) {
     const timeWindow = classifyTimeOut(timeOut);
     if (!timeWindow.ok) return sendJson(res, 400, { message: timeWindow.message });
     const session = requestedSlot || timeWindow.session;
+    const timeOutMinutes = timeToMinutes(timeOut);
+    if (session === 'PM' && timeOutMinutes !== null && timeOutMinutes < PM_IN_START) {
+      return sendJson(res, 400, { message: 'Time Out (PM) is available starting 1:00 PM.' });
+    }
     const photo = body.photo || '';
     const location = body.location || '';
     const latitude = body.latitude || '';
@@ -4710,6 +4714,10 @@ async function handleApi(req, res, pathname) {
       }
       const requestedSlot = normalizeAttendanceSlot(body.slot || body.session);
       const session = requestedSlot || timeWindow.session;
+      const timeOutMinutes = timeToMinutes(timeOut);
+      if (session === 'PM' && timeOutMinutes !== null && timeOutMinutes < PM_IN_START) {
+        return sendJson(res, 400, { message: 'Time Out (PM) is available starting 1:00 PM.' });
+      }
       const photo = body.photo || '';
       const location = body.location || '';
       const latitude = body.latitude || '';

@@ -876,6 +876,20 @@ function buildAttendanceSlotTimes(item) {
     pmOut: item.timeOutPM || ''
   };
 
+  // Fix bad/mis-tapped legacy data where PM fields were saved with AM times.
+  // If PM time is earlier than 1:00 PM, treat it as AM when AM slot is empty.
+  const PM_START_MINUTES = 13 * 60;
+  const pmInMinutes = timeToMinutes(values.pmIn);
+  if (values.pmIn && pmInMinutes !== null && pmInMinutes < PM_START_MINUTES && !values.amIn) {
+    values.amIn = values.pmIn;
+    values.pmIn = '';
+  }
+  const pmOutMinutes = timeToMinutes(values.pmOut);
+  if (values.pmOut && pmOutMinutes !== null && pmOutMinutes < PM_START_MINUTES && !values.amOut) {
+    values.amOut = values.pmOut;
+    values.pmOut = '';
+  }
+
   // Legacy compatibility: some records only have timeIn/timeOut (no AM/PM split).
   // Classify by time of day to avoid treating an AM out as a PM out.
   if (!values.amIn && item.timeIn && !values.pmIn) {
