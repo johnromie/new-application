@@ -1069,10 +1069,6 @@ async function handleTimeOutClick(slot, sourceBtn) {
       showAlreadyRecordedNotice('timeout', 'AM', times.amOut);
       return;
     }
-    if (!times.amIn) {
-      showAttendanceBlocked('Please record Time In (AM) first before Time Out (AM).');
-      return;
-    }
     await markTimeOut('AM', sourceBtn);
     return;
   }
@@ -1082,12 +1078,12 @@ async function handleTimeOutClick(slot, sourceBtn) {
     showAlreadyRecordedNotice('timeout', 'PM', times.pmOut);
     return;
   }
-  if (!times.pmIn) {
-    showAttendanceBlocked('Please record Time In (PM) first before Time Out (PM).');
-    return;
-  }
   if (nowMinutes < PM_START) {
     showAttendanceBlocked('Time Out (PM) is available starting 1:00 PM.');
+    return;
+  }
+  if (times.amIn && !times.amOut) {
+    showAttendanceBlocked('Please record Time Out (AM) first before Time Out (PM).');
     return;
   }
   await markTimeOut('PM', sourceBtn);
