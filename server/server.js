@@ -3726,9 +3726,6 @@ async function handleApiPg(req, res, pathname) {
     if (!timeWindow.ok) return sendJson(res, 400, { message: timeWindow.message });
     const session = requestedSlot || timeWindow.session;
     const timeInMinutes = timeToMinutes(timeIn);
-    if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START) {
-      return sendJson(res, 400, { message: 'Time In (PM) is available starting 1:00 PM.' });
-    }
     const photo = body.photo || '';
     const location = body.location || '';
     const latitude = body.latitude || '';
@@ -3741,6 +3738,9 @@ async function handleApiPg(req, res, pathname) {
       const existing = mapAttendanceRow(existingRes.rows[0]);
       if (existing.timeIn && !existing.timeInAM) existing.timeInAM = existing.timeIn;
       if (existing.timeOut && !existing.timeOutAM) existing.timeOutAM = existing.timeOut;
+      if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START && !existing.timeOutAM) {
+        return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time In (PM).' });
+      }
       if (session === 'PM' && existing.timeInAM && !existing.timeOutAM) {
         return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time In (PM).' });
       }
@@ -3767,6 +3767,9 @@ async function handleApiPg(req, res, pathname) {
       existing.status = computeDailyStatus(existing);
       await upsertAttendancePg(existing);
       return sendJson(res, 200, { attendance: existing, slot: session });
+    }
+    if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START) {
+      return sendJson(res, 400, { message: 'Time In (PM) is available starting 1:00 PM.' });
     }
     const record = {
       id: `ATT-${date}-${employeeId}`,
@@ -3830,10 +3833,6 @@ async function handleApiPg(req, res, pathname) {
     const timeWindow = classifyTimeOut(timeOut);
     if (!timeWindow.ok) return sendJson(res, 400, { message: timeWindow.message });
     const session = requestedSlot || timeWindow.session;
-    const timeOutMinutes = timeToMinutes(timeOut);
-    if (session === 'PM' && timeOutMinutes !== null && timeOutMinutes < PM_IN_START) {
-      return sendJson(res, 400, { message: 'Time Out (PM) is available starting 1:00 PM.' });
-    }
     const photo = body.photo || '';
     const location = body.location || '';
     const latitude = body.latitude || '';
@@ -4602,9 +4601,6 @@ async function handleApi(req, res, pathname) {
       const requestedSlot = normalizeAttendanceSlot(body.slot || body.session);
       const session = requestedSlot || timeWindow.session;
       const timeInMinutes = timeToMinutes(timeIn);
-      if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START) {
-        return sendJson(res, 400, { message: 'Time In (PM) is available starting 1:00 PM.' });
-      }
       const photo = body.photo || '';
       const location = body.location || '';
       const latitude = body.latitude || '';
@@ -4613,6 +4609,9 @@ async function handleApi(req, res, pathname) {
       if (existing) {
         if (existing.timeIn && !existing.timeInAM) existing.timeInAM = existing.timeIn;
         if (existing.timeOut && !existing.timeOutAM) existing.timeOutAM = existing.timeOut;
+        if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START && !existing.timeOutAM) {
+          return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time In (PM).' });
+        }
         if (session === 'PM' && existing.timeInAM && !existing.timeOutAM) {
           return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time In (PM).' });
         }
@@ -4639,6 +4638,9 @@ async function handleApi(req, res, pathname) {
         existing.status = computeDailyStatus(existing);
         if (!persistJsonDbOrFail(res, db)) return;
         return sendJson(res, 200, { attendance: existing, slot: session });
+      }
+      if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START) {
+        return sendJson(res, 400, { message: 'Time In (PM) is available starting 1:00 PM.' });
       }
       const record = {
         id: `ATT-${date}-${employeeId}`,
@@ -4708,10 +4710,6 @@ async function handleApi(req, res, pathname) {
       }
       const requestedSlot = normalizeAttendanceSlot(body.slot || body.session);
       const session = requestedSlot || timeWindow.session;
-      const timeOutMinutes = timeToMinutes(timeOut);
-      if (session === 'PM' && timeOutMinutes !== null && timeOutMinutes < PM_IN_START) {
-        return sendJson(res, 400, { message: 'Time Out (PM) is available starting 1:00 PM.' });
-      }
       const photo = body.photo || '';
       const location = body.location || '';
       const latitude = body.latitude || '';

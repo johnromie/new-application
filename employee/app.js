@@ -39,10 +39,8 @@ const gpsStatus = document.getElementById('gps-status');
 const openMapCurrentBtn = document.getElementById('open-map-current');
 const refreshLocationBtn = document.getElementById('refresh-location');
 
-const timeInAmBtn = document.getElementById('time-in-am'); 
-const timeOutAmBtn = document.getElementById('time-out-am'); 
-const timeInPmBtn = document.getElementById('time-in-pm'); 
-const timeOutPmBtn = document.getElementById('time-out-pm'); 
+const timeInBtn = document.getElementById('time-in');
+const timeOutBtn = document.getElementById('time-out');
 const gpsRefreshBtn = document.getElementById('gps-refresh'); 
 const attendanceNotice = document.getElementById('attendance-notice'); 
 
@@ -984,120 +982,88 @@ function showAttendanceBlocked(message) {
   alert(msg);
 }
 
-function updateMarkAttendanceButtons() { 
-  if (!timeInAmBtn || !timeOutAmBtn || !timeInPmBtn || !timeOutPmBtn) return; 
-  const times = getTodaySlotTimes(); 
-  const amInDone = !!times.amIn; 
-  const amOutDone = !!times.amOut; 
-  const pmInDone = !!times.pmIn; 
-  const pmOutDone = !!times.pmOut; 
+function computeNextTwoButtonAttendanceAction() {
+  const times = getTodaySlotTimes();
+  const amIn = times.amIn || '';
+  const amOut = times.amOut || '';
+  const pmIn = times.pmIn || '';
+  const pmOut = times.pmOut || '';
 
   const nowMinutes = getMinutesNowLocal();
   const PM_START = 13 * 60; // 1:00 PM
   const isPmWindow = nowMinutes >= PM_START;
 
-  // Goal: prevent wrong taps (e.g., PM Time In while it is still AM).
-  // Rule set:
-  // 1) Before 1:00 PM: only AM buttons are allowed (PM buttons disabled).
-  // 2) From 1:00 PM onwards: PM buttons are allowed only if AM is complete (AM In + AM Out),
-  //    except when AM Time In was forgotten (no AM In at all) and it's already PM time.
-  // 3) AM Time Out requires AM Time In first.
-  // 4) PM Time Out requires PM Time In first.
+  // 2-button sequence behavior:
+  // 1) If AM In is missing: Time In goes to AM (before 1PM) else PM (after 1PM).
+  // 2) If AM In exists but AM Out missing: Time Out is AM.
+  // 3) If AM Out exists but PM In missing: Time In is PM (allowed immediately after AM Out even before 1PM).
+  // 4) If PM In exists but PM Out missing: Time Out is PM.
+  // 5) If PM Out exists: done.
 
-  if (!isPmWindow) {
-    setAttendanceButtonState(timeInAmBtn, true);
-    setAttendanceButtonState(timeOutAmBtn, amInDone);
-    setAttendanceButtonState(timeInPmBtn, false);
-    setAttendanceButtonState(timeOutPmBtn, false);
-    return;
+  if (!amIn) {
+    return { action: 'timein', slot: isPmWindow ? 'PM' : 'AM' };
   }
-
-  // PM window
-  // If AM Time In exists but AM Time Out is missing, require AM Time Out first (prevents wrong PM taps).
-  if (amInDone && !amOutDone) {
-    setAttendanceButtonState(timeInAmBtn, false);
-    setAttendanceButtonState(timeOutAmBtn, true);
-    setAttendanceButtonState(timeInPmBtn, false);
-    setAttendanceButtonState(timeOutPmBtn, false);
-    return;
+  if (!amOut) {
+    return { action: 'timeout', slot: 'AM' };
   }
-
-  // Allow PM when AM is complete, OR when AM Time In was forgotten and it's already PM.
-  const allowPm = (!amInDone) || (amInDone && amOutDone);
-  setAttendanceButtonState(timeInAmBtn, false);
-  setAttendanceButtonState(timeOutAmBtn, false);
-  setAttendanceButtonState(timeInPmBtn, allowPm);
-  setAttendanceButtonState(timeOutPmBtn, allowPm && pmInDone);
-} 
- 
-async function handleTimeInClick(slot, sourceBtn) {
-  const safeSlot = slot === 'PM' ? 'PM' : 'AM';
-  const times = getTodaySlotTimes();
-  const nowMinutes = getMinutesNowLocal();
-  const PM_START = 13 * 60;
-
-  if (safeSlot === 'PM' && nowMinutes < PM_START) {
-    showAttendanceBlocked('Time In (PM) is available starting 1:00 PM.');
-    return;
+  if (!pmIn) {
+    return { action: 'timein', slot: 'PM' };
   }
-  if (safeSlot === 'AM' && nowMinutes >= PM_START) {
-    showAttendanceBlocked('Time In (AM) is only available before 1:00 PM.');
-    return;
+  if (!pmOut) {
+    return { action: 'timeout', slot: 'PM' };
   }
-  if (safeSlot === 'PM' && times.amIn && !times.amOut) {
-    showAttendanceBlocked('Please record Time Out (AM) first before Time In (PM).');
-    return;
-  }
-
-  if (safeSlot === 'AM' && times.amIn) {
-    showAlreadyRecordedNotice('timein', 'AM', times.amIn);
-    return;
-  }
-  if (safeSlot === 'PM' && times.pmIn) {
-    showAlreadyRecordedNotice('timein', 'PM', times.pmIn);
-    return;
-  }
-
-  await markTimeIn(safeSlot, sourceBtn);
+  return { action: 'done', slot: '' };
 }
 
-async function handleTimeOutClick(slot, sourceBtn) {
-  const safeSlot = slot === 'PM' ? 'PM' : 'AM';
-  const times = getTodaySlotTimes();
-  const nowMinutes = getMinutesNowLocal();
-  const PM_START = 13 * 60;
+function updateMarkAttendanceButtons() {
+  if (!timeInBtn || !timeOutBtn) return;
+  const next = computeNextTwoButtonAttendanceAction();
 
-  if (safeSlot === 'PM' && nowMinutes < PM_START) {
-    showAttendanceBlocked('Time Out (PM) is available starting 1:00 PM.');
-    return;
-  }
-  if (safeSlot === 'AM' && nowMinutes >= PM_START) {
-    showAttendanceBlocked('Time Out (AM) is only available before 1:00 PM.');
-    return;
-  }
-  if (safeSlot === 'AM' && !times.amIn) {
-    showAttendanceBlocked('Please record Time In (AM) first before Time Out (AM).');
-    return;
-  }
-  if (safeSlot === 'PM' && times.amIn && !times.amOut) {
-    showAttendanceBlocked('Please record Time Out (AM) first before Time Out (PM).');
-    return;
-  }
-  if (safeSlot === 'PM' && !times.pmIn) {
-    showAttendanceBlocked('Please record Time In (PM) first before Time Out (PM).');
+  if (next.action === 'done') {
+    timeInBtn.textContent = 'COMPLETED';
+    timeOutBtn.textContent = 'COMPLETED';
+    setAttendanceButtonState(timeInBtn, false);
+    setAttendanceButtonState(timeOutBtn, false);
     return;
   }
 
-  if (safeSlot === 'AM' && times.amOut) {
-    showAlreadyRecordedNotice('timeout', 'AM', times.amOut);
-    return;
-  }
-  if (safeSlot === 'PM' && times.pmOut) {
-    showAlreadyRecordedNotice('timeout', 'PM', times.pmOut);
-    return;
-  }
+  const timeInLabel = `TIME IN (${next.action === 'timein' ? next.slot : (next.slot === 'PM' ? 'PM' : 'AM')})`;
+  const timeOutLabel = `TIME OUT (${next.action === 'timeout' ? next.slot : (next.slot === 'PM' ? 'PM' : 'AM')})`;
 
-  await markTimeOut(safeSlot, sourceBtn);
+  // Show which slot will be recorded, even though only 2 buttons are visible.
+  timeInBtn.textContent = next.action === 'timein' ? timeInLabel : 'TIME IN';
+  timeOutBtn.textContent = next.action === 'timeout' ? timeOutLabel : 'TIME OUT';
+
+  setAttendanceButtonState(timeInBtn, next.action === 'timein');
+  setAttendanceButtonState(timeOutBtn, next.action === 'timeout');
+}
+ 
+async function handleTimeInClick(sourceBtn) {
+  const next = computeNextTwoButtonAttendanceAction();
+  if (next.action !== 'timein') {
+    const times = getTodaySlotTimes();
+    if (times.amIn && times.amOut && times.pmIn && times.pmOut) {
+      showAttendanceBlocked('Attendance already completed for today.');
+      return;
+    }
+    showAttendanceBlocked('Time In is not available right now.');
+    return;
+  }
+  await markTimeIn(next.slot, sourceBtn);
+}
+
+async function handleTimeOutClick(sourceBtn) {
+  const next = computeNextTwoButtonAttendanceAction();
+  if (next.action !== 'timeout') {
+    const times = getTodaySlotTimes();
+    if (times.amIn && times.amOut && times.pmIn && times.pmOut) {
+      showAttendanceBlocked('Attendance already completed for today.');
+      return;
+    }
+    showAttendanceBlocked('Time Out is not available right now.');
+    return;
+  }
+  await markTimeOut(next.slot, sourceBtn);
 }
 
 function buildAttendanceSlotDetails(item) {
@@ -2056,7 +2022,7 @@ function setAttendanceNotice(message, tone = 'loading') {
 }
 
 function setAttendanceButtonsLocked(locked, activeBtn = null) { 
-  const btns = [timeInAmBtn, timeOutAmBtn, timeInPmBtn, timeOutPmBtn].filter(Boolean);
+  const btns = [timeInBtn, timeOutBtn].filter(Boolean);
   if (btns.length === 0) return;
 
   btns.forEach((btn) => {
@@ -2696,15 +2662,11 @@ function bindAttendanceAudioWarmup(button) {
   });
 }
 
-bindAttendanceAudioWarmup(timeInAmBtn); 
-bindAttendanceAudioWarmup(timeOutAmBtn); 
-bindAttendanceAudioWarmup(timeInPmBtn); 
-bindAttendanceAudioWarmup(timeOutPmBtn); 
- 
-if (timeInAmBtn) timeInAmBtn.addEventListener('click', () => handleTimeInClick('AM', timeInAmBtn)); 
-if (timeOutAmBtn) timeOutAmBtn.addEventListener('click', () => handleTimeOutClick('AM', timeOutAmBtn)); 
-if (timeInPmBtn) timeInPmBtn.addEventListener('click', () => handleTimeInClick('PM', timeInPmBtn)); 
-if (timeOutPmBtn) timeOutPmBtn.addEventListener('click', () => handleTimeOutClick('PM', timeOutPmBtn)); 
+bindAttendanceAudioWarmup(timeInBtn);
+bindAttendanceAudioWarmup(timeOutBtn);
+
+if (timeInBtn) timeInBtn.addEventListener('click', () => handleTimeInClick(timeInBtn));
+if (timeOutBtn) timeOutBtn.addEventListener('click', () => handleTimeOutClick(timeOutBtn));
 
 if (takePhotoBtn) {
   takePhotoBtn.addEventListener('click', (event) => {
