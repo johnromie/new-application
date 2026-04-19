@@ -992,18 +992,62 @@ function updateMarkAttendanceButtons() {
   const pmInDone = !!times.pmIn; 
   const pmOutDone = !!times.pmOut; 
 
-  // Always show 4 buttons; enable only the next valid action.
-  // Per requirement: allow users to tap AM/PM time in/out anytime.
-  // If the slot is already recorded, the button will show an "already recorded" notice.
-  setAttendanceButtonState(timeInAmBtn, true); 
-  setAttendanceButtonState(timeOutAmBtn, true); 
-  setAttendanceButtonState(timeInPmBtn, true); 
-  setAttendanceButtonState(timeOutPmBtn, true); 
+  const nowMinutes = getMinutesNowLocal();
+  const PM_START = 13 * 60; // 1:00 PM
+  const isPmWindow = nowMinutes >= PM_START;
+
+  // Goal: prevent wrong taps (e.g., PM Time In while it is still AM).
+  // Rule set:
+  // 1) Before 1:00 PM: only AM buttons are allowed (PM buttons disabled).
+  // 2) From 1:00 PM onwards: PM buttons are allowed only if AM is complete (AM In + AM Out),
+  //    except when AM Time In was forgotten (no AM In at all) and it's already PM time.
+  // 3) AM Time Out requires AM Time In first.
+  // 4) PM Time Out requires PM Time In first.
+
+  if (!isPmWindow) {
+    setAttendanceButtonState(timeInAmBtn, true);
+    setAttendanceButtonState(timeOutAmBtn, amInDone);
+    setAttendanceButtonState(timeInPmBtn, false);
+    setAttendanceButtonState(timeOutPmBtn, false);
+    return;
+  }
+
+  // PM window
+  // If AM Time In exists but AM Time Out is missing, require AM Time Out first (prevents wrong PM taps).
+  if (amInDone && !amOutDone) {
+    setAttendanceButtonState(timeInAmBtn, false);
+    setAttendanceButtonState(timeOutAmBtn, true);
+    setAttendanceButtonState(timeInPmBtn, false);
+    setAttendanceButtonState(timeOutPmBtn, false);
+    return;
+  }
+
+  // Allow PM when AM is complete, OR when AM Time In was forgotten and it's already PM.
+  const allowPm = (!amInDone) || (amInDone && amOutDone);
+  setAttendanceButtonState(timeInAmBtn, false);
+  setAttendanceButtonState(timeOutAmBtn, false);
+  setAttendanceButtonState(timeInPmBtn, allowPm);
+  setAttendanceButtonState(timeOutPmBtn, allowPm && pmInDone);
 } 
  
 async function handleTimeInClick(slot, sourceBtn) {
   const safeSlot = slot === 'PM' ? 'PM' : 'AM';
   const times = getTodaySlotTimes();
+  const nowMinutes = getMinutesNowLocal();
+  const PM_START = 13 * 60;
+
+  if (safeSlot === 'PM' && nowMinutes < PM_START) {
+    showAttendanceBlocked('Time In (PM) is available starting 1:00 PM.');
+    return;
+  }
+  if (safeSlot === 'AM' && nowMinutes >= PM_START) {
+    showAttendanceBlocked('Time In (AM) is only available before 1:00 PM.');
+    return;
+  }
+  if (safeSlot === 'PM' && times.amIn && !times.amOut) {
+    showAttendanceBlocked('Please record Time Out (AM) first before Time In (PM).');
+    return;
+  }
 
   if (safeSlot === 'AM' && times.amIn) {
     showAlreadyRecordedNotice('timein', 'AM', times.amIn);
@@ -1020,6 +1064,29 @@ async function handleTimeInClick(slot, sourceBtn) {
 async function handleTimeOutClick(slot, sourceBtn) {
   const safeSlot = slot === 'PM' ? 'PM' : 'AM';
   const times = getTodaySlotTimes();
+  const nowMinutes = getMinutesNowLocal();
+  const PM_START = 13 * 60;
+
+  if (safeSlot === 'PM' && nowMinutes < PM_START) {
+    showAttendanceBlocked('Time Out (PM) is available starting 1:00 PM.');
+    return;
+  }
+  if (safeSlot === 'AM' && nowMinutes >= PM_START) {
+    showAttendanceBlocked('Time Out (AM) is only available before 1:00 PM.');
+    return;
+  }
+  if (safeSlot === 'AM' && !times.amIn) {
+    showAttendanceBlocked('Please record Time In (AM) first before Time Out (AM).');
+    return;
+  }
+  if (safeSlot === 'PM' && times.amIn && !times.amOut) {
+    showAttendanceBlocked('Please record Time Out (AM) first before Time Out (PM).');
+    return;
+  }
+  if (safeSlot === 'PM' && !times.pmIn) {
+    showAttendanceBlocked('Please record Time In (PM) first before Time Out (PM).');
+    return;
+  }
 
   if (safeSlot === 'AM' && times.amOut) {
     showAlreadyRecordedNotice('timeout', 'AM', times.amOut);
