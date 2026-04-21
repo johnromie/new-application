@@ -854,6 +854,8 @@ const PM_OUT_START = 17 * 60;
 const BIOMETRIC_SESSION_SPLIT = 13 * 60; // 1:00 PM
 const AM_LATE_CUTOFF_MINUTES = Number(process.env.AM_LATE_CUTOFF_MINUTES || 8 * 60); // 8:00 AM
 const PM_LATE_CUTOFF_MINUTES = Number(process.env.PM_LATE_CUTOFF_MINUTES || (13 * 60)); // 1:00 PM
+// Allow early PM time-in starting 11:30 AM to handle "forgot AM out" scenarios.
+const EARLY_PM_IN_OVERRIDE_MINUTES = Number(process.env.EARLY_PM_IN_OVERRIDE_MINUTES || (11 * 60 + 30)); // 11:30 AM
 
 function classifyTimeIn(time) {
   const minutes = timeToMinutes(time);
@@ -965,7 +967,8 @@ function normalizeAttendanceRecord(record) {
   const amOutMin = timeToMinutes(normalized.timeOutAM);
   let pmInMin = timeToMinutes(normalized.timeInPM);
   if (pmInMin !== null && pmInMin < PM_IN_START) {
-    const isValidEarlyPmIn = amOutMin !== null && amOutMin <= pmInMin;
+    const isOverrideWindowEarlyPmIn = pmInMin >= EARLY_PM_IN_OVERRIDE_MINUTES && amOutMin === null;
+    const isValidEarlyPmIn = (amOutMin !== null && amOutMin <= pmInMin) || isOverrideWindowEarlyPmIn;
     if (!isValidEarlyPmIn) {
       if (!normalized.timeInAM) {
         normalized.timeInAM = normalized.timeInPM;
@@ -3776,6 +3779,11 @@ async function handleApiPg(req, res, pathname) {
     if (!timeWindow.ok) return sendJson(res, 400, { message: timeWindow.message });
     const session = requestedSlot || timeWindow.session;
     const timeInMinutes = timeToMinutes(timeIn);
+    const allowEarlyPmOverride =
+      session === 'PM' &&
+      timeInMinutes !== null &&
+      timeInMinutes >= EARLY_PM_IN_OVERRIDE_MINUTES &&
+      timeInMinutes < PM_IN_START;
     const photo = body.photo || '';
     const location = body.location || '';
     const latitude = body.latitude || '';
@@ -3788,10 +3796,14 @@ async function handleApiPg(req, res, pathname) {
       const existing = mapAttendanceRow(existingRes.rows[0]);
       if (existing.timeIn && !existing.timeInAM) existing.timeInAM = existing.timeIn;
       if (existing.timeOut && !existing.timeOutAM) existing.timeOutAM = existing.timeOut;
-      if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START && !existing.timeOutAM) {
+      // Once PM is recorded, AM logs are locked.
+      if (session === 'AM' && (existing.timeInPM || existing.timeOutPM)) {
+        return sendJson(res, 400, { message: 'AM time logs are locked once PM attendance is recorded.' });
+      }
+      if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START && !existing.timeOutAM && !allowEarlyPmOverride) {
         return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time In (PM).' });
       }
-      if (session === 'PM' && existing.timeInAM && !existing.timeOutAM) {
+      if (session === 'PM' && existing.timeInAM && !existing.timeOutAM && !allowEarlyPmOverride) {
         return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time In (PM).' });
       }
       if (session === 'AM') {
@@ -3818,8 +3830,8 @@ async function handleApiPg(req, res, pathname) {
       await upsertAttendancePg(existing);
       return sendJson(res, 200, { attendance: existing, slot: session });
     }
-    if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START) {
-      return sendJson(res, 400, { message: 'Time In (PM) is available starting 1:00 PM.' });
+    if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START && !allowEarlyPmOverride) {
+      return sendJson(res, 400, { message: 'Time In (PM) is available starting 11:30 AM.' });
     }
     const record = {
       id: `ATT-${date}-${employeeId}`,
@@ -3951,6 +3963,10 @@ async function handleApiPg(req, res, pathname) {
     const existing = mapAttendanceRow(existingRes.rows[0]);
     if (existing.timeIn && !existing.timeInAM) existing.timeInAM = existing.timeIn;
     if (existing.timeOut && !existing.timeOutAM) existing.timeOutAM = existing.timeOut;
+    // Once PM is recorded, AM logs are locked.
+    if (session === 'AM' && (existing.timeInPM || existing.timeOutPM)) {
+      return sendJson(res, 400, { message: 'AM time logs are locked once PM attendance is recorded.' });
+    }
     if (session === 'PM' && existing.timeInAM && !existing.timeOutAM) {
       return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time Out (PM).' });
     }
@@ -4694,6 +4710,11 @@ async function handleApi(req, res, pathname) {
       const requestedSlot = normalizeAttendanceSlot(body.slot || body.session);
       const session = requestedSlot || timeWindow.session;
       const timeInMinutes = timeToMinutes(timeIn);
+      const allowEarlyPmOverride =
+        session === 'PM' &&
+        timeInMinutes !== null &&
+        timeInMinutes >= EARLY_PM_IN_OVERRIDE_MINUTES &&
+        timeInMinutes < PM_IN_START;
       const photo = body.photo || '';
       const location = body.location || '';
       const latitude = body.latitude || '';
@@ -4702,10 +4723,14 @@ async function handleApi(req, res, pathname) {
       if (existing) {
         if (existing.timeIn && !existing.timeInAM) existing.timeInAM = existing.timeIn;
         if (existing.timeOut && !existing.timeOutAM) existing.timeOutAM = existing.timeOut;
-        if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START && !existing.timeOutAM) {
+        // Once PM is recorded, AM logs are locked.
+        if (session === 'AM' && (existing.timeInPM || existing.timeOutPM)) {
+          return sendJson(res, 400, { message: 'AM time logs are locked once PM attendance is recorded.' });
+        }
+        if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START && !existing.timeOutAM && !allowEarlyPmOverride) {
           return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time In (PM).' });
         }
-        if (session === 'PM' && existing.timeInAM && !existing.timeOutAM) {
+        if (session === 'PM' && existing.timeInAM && !existing.timeOutAM && !allowEarlyPmOverride) {
           return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time In (PM).' });
         }
         if (session === 'AM') {
@@ -4732,8 +4757,8 @@ async function handleApi(req, res, pathname) {
         if (!persistJsonDbOrFail(res, db)) return;
         return sendJson(res, 200, { attendance: existing, slot: session });
       }
-      if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START) {
-        return sendJson(res, 400, { message: 'Time In (PM) is available starting 1:00 PM.' });
+      if (session === 'PM' && timeInMinutes !== null && timeInMinutes < PM_IN_START && !allowEarlyPmOverride) {
+        return sendJson(res, 400, { message: 'Time In (PM) is available starting 11:30 AM.' });
       }
       const record = {
         id: `ATT-${date}-${employeeId}`,
@@ -4868,6 +4893,10 @@ async function handleApi(req, res, pathname) {
       }
       if (existing.timeIn && !existing.timeInAM) existing.timeInAM = existing.timeIn;
       if (existing.timeOut && !existing.timeOutAM) existing.timeOutAM = existing.timeOut;
+      // Once PM is recorded, AM logs are locked.
+      if (session === 'AM' && (existing.timeInPM || existing.timeOutPM)) {
+        return sendJson(res, 400, { message: 'AM time logs are locked once PM attendance is recorded.' });
+      }
       if (session === 'PM' && existing.timeInAM && !existing.timeOutAM) {
         return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time Out (PM).' });
       }

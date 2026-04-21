@@ -1019,8 +1019,14 @@ async function handleTimeInClick(slot, sourceBtn) {
   const times = getTodaySlotTimes();
   const nowMinutes = getMinutesNowLocal();
   const PM_START = 13 * 60;
+  const EARLY_PM_OVERRIDE_START = 11 * 60 + 30; // 11:30 AM
 
   if (safeSlot === 'AM') {
+    // Once PM attendance is recorded, AM slots should be locked (biometric-like behavior).
+    if (times.pmIn || times.pmOut) {
+      showAttendanceBlocked('AM time logs are locked once PM attendance is recorded.');
+      return;
+    }
     if (times.amIn) {
       showAlreadyRecordedNotice('timein', 'AM', times.amIn);
       return;
@@ -1039,20 +1045,18 @@ async function handleTimeInClick(slot, sourceBtn) {
     showAlreadyRecordedNotice('timein', 'PM', times.pmIn);
     return;
   }
-  // PM time-in is allowed before 1PM only if AM out is already recorded.
-  if (!times.amOut && nowMinutes < PM_START) {
-    showAttendanceBlocked('Please record Time Out (AM) first before Time In (PM).');
-    return;
-  }
-  // If AM in exists but AM out missing, require AM out first.
-  if (times.amIn && !times.amOut) {
-    showAttendanceBlocked('Please record Time Out (AM) first before Time In (PM).');
-    return;
-  }
-  // If AM was forgotten, allow PM in only once it is 1PM onwards.
-  if (!times.amIn && nowMinutes < PM_START) {
-    showAttendanceBlocked('Time In (PM) is available starting 1:00 PM.');
-    return;
+  // PM time-in is allowed early (11:30 AM onwards) to handle cases where AM Out was forgotten.
+  if (nowMinutes < PM_START) {
+    // If AM In exists but AM Out missing, allow PM In only at 11:30 AM onwards.
+    if (times.amIn && !times.amOut && nowMinutes < EARLY_PM_OVERRIDE_START) {
+      showAttendanceBlocked('Please record Time Out (AM) first before Time In (PM).');
+      return;
+    }
+    // If AM Out is missing, require the 11:30 AM override window.
+    if (!times.amOut && nowMinutes < EARLY_PM_OVERRIDE_START) {
+      showAttendanceBlocked('Time In (PM) is available starting 11:30 AM (or after Time Out (AM)).');
+      return;
+    }
   }
 
   await markTimeIn('PM', sourceBtn);
@@ -1065,6 +1069,11 @@ async function handleTimeOutClick(slot, sourceBtn) {
   const PM_START = 13 * 60;
 
   if (safeSlot === 'AM') {
+    // Once PM attendance is recorded, AM slots should be locked (biometric-like behavior).
+    if (times.pmIn || times.pmOut) {
+      showAttendanceBlocked('AM time logs are locked once PM attendance is recorded.');
+      return;
+    }
     if (times.amOut) {
       showAlreadyRecordedNotice('timeout', 'AM', times.amOut);
       return;

@@ -208,8 +208,15 @@ function buildAttendanceSlotTimes(item) {
   // Fix bad/mis-tapped legacy data where PM fields were saved with AM times.
   // If PM time is earlier than 1:00 PM, treat it as AM when AM slot is empty.
   const PM_START_MINUTES = 13 * 60;
+  const EARLY_PM_OVERRIDE_START = 11 * 60 + 30; // 11:30 AM
   const pmInMinutes = timeToMinutes(values.pmIn);
-  if (values.pmIn && pmInMinutes !== null && pmInMinutes < PM_START_MINUTES && !values.amIn) {
+  if (
+    values.pmIn &&
+    pmInMinutes !== null &&
+    pmInMinutes < PM_START_MINUTES &&
+    pmInMinutes < EARLY_PM_OVERRIDE_START &&
+    !values.amIn
+  ) {
     values.amIn = values.pmIn;
     values.pmIn = '';
   }
