@@ -1091,10 +1091,6 @@ async function handleTimeOutClick(slot, sourceBtn) {
     showAttendanceBlocked('Time Out (PM) is available starting 1:00 PM.');
     return;
   }
-  if (times.amIn && !times.amOut) {
-    showAttendanceBlocked('Please record Time Out (AM) first before Time Out (PM).');
-    return;
-  }
   await markTimeOut('PM', sourceBtn);
 }
 

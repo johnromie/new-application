@@ -3967,9 +3967,7 @@ async function handleApiPg(req, res, pathname) {
     if (session === 'AM' && (existing.timeInPM || existing.timeOutPM)) {
       return sendJson(res, 400, { message: 'AM time logs are locked once PM attendance is recorded.' });
     }
-    if (session === 'PM' && existing.timeInAM && !existing.timeOutAM) {
-      return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time Out (PM).' });
-    }
+    // Allow PM time-out even if AM time-out was missed.
     if (session === 'AM') {
       if (existing.timeOutAM) return sendJson(res, 409, { message: 'Time out already recorded.' });
       existing.timeOutAM = timeOut;
@@ -4897,9 +4895,7 @@ async function handleApi(req, res, pathname) {
       if (session === 'AM' && (existing.timeInPM || existing.timeOutPM)) {
         return sendJson(res, 400, { message: 'AM time logs are locked once PM attendance is recorded.' });
       }
-      if (session === 'PM' && existing.timeInAM && !existing.timeOutAM) {
-        return sendJson(res, 400, { message: 'Please record Time Out (AM) first before Time Out (PM).' });
-      }
+      // Allow PM time-out even if AM time-out was missed.
       if (session === 'AM') {
         if (existing.timeOutAM) return sendJson(res, 409, { message: 'Time out already recorded.' });
         existing.timeOutAM = timeOut;
