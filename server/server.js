@@ -819,6 +819,10 @@ function isoToday() {
   return `${y}-${m}-${d}`;
 }
 
+function isValidIsoDate(dateStr) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || '').trim());
+}
+
 function getPhilippineNow() {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Manila',
@@ -3289,12 +3293,19 @@ async function handleApiPg(req, res, pathname) {
     const body = await collectBody(req);
     const employeeId = String(body.employeeId || '').trim();
     const summary = String(body.summary || '').trim();
-    const reportDate = String(body.reportDate || body.date || isoToday());
+    const reportDate = String(body.reportDate || body.date || isoToday()).trim().slice(0, 10);
     const attachmentData = String(body.attachment || body.attachmentData || '');
     const attachmentName = String(body.attachmentName || '');
 
     if (!employeeId || !summary) {
       return sendJson(res, 400, { ok: false, message: 'Employee and summary are required.' });
+    }
+    const today = isoToday();
+    if (!isValidIsoDate(reportDate)) {
+      return sendJson(res, 400, { ok: false, message: 'Invalid report date.' });
+    }
+    if (reportDate > today) {
+      return sendJson(res, 400, { ok: false, message: 'Report date cannot be in the future.' });
     }
 
     const empRes = await pgQuery('SELECT name, office FROM employees WHERE id = $1', [employeeId]);
@@ -4282,11 +4293,18 @@ async function handleApi(req, res, pathname) {
       const db = readDb();
       const employeeId = String(body.employeeId || '').trim();
       const summary = String(body.summary || '').trim();
-      const reportDate = String(body.reportDate || body.date || isoToday());
+      const reportDate = String(body.reportDate || body.date || isoToday()).trim().slice(0, 10);
       const attachmentData = String(body.attachment || body.attachmentData || '');
       const attachmentName = String(body.attachmentName || '');
       if (!employeeId || !summary) {
         return sendJson(res, 400, { ok: false, message: 'Employee and summary are required.' });
+      }
+      const today = isoToday();
+      if (!isValidIsoDate(reportDate)) {
+        return sendJson(res, 400, { ok: false, message: 'Invalid report date.' });
+      }
+      if (reportDate > today) {
+        return sendJson(res, 400, { ok: false, message: 'Report date cannot be in the future.' });
       }
       const emp = db.employees.find((e) => e.id === employeeId);
       const report = pushReport(db, {

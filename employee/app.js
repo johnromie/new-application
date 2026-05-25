@@ -82,6 +82,7 @@ const cancelConcernBtn = document.getElementById('cancel-concern');
 const concernForm = document.getElementById('concern-form');
 const reportForm = document.getElementById('daily-report-form');
 const reportDateLabel = document.getElementById('report-date-label');
+const reportDateInput = document.getElementById('report-date-input');
 const reportEmpName = document.getElementById('report-emp-name');
 const reportEmpPosition = document.getElementById('report-emp-position');
 const reportDivision = document.getElementById('report-division');
@@ -685,6 +686,15 @@ function isoToday() {
   return `${y}-${m}-${d}`;
 }
 
+function isValidIsoDate(dateStr) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || '').trim());
+}
+
+function getSelectedReportDate() {
+  const value = reportDateInput ? String(reportDateInput.value || '').trim() : '';
+  return isValidIsoDate(value) ? value : isoToday();
+}
+
 function timeNow() {
   const now = new Date();
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -717,7 +727,6 @@ function tickClock() {
   const now = new Date();
   empTime.textContent = formatTime(now);
   empDate.textContent = formatDate(now);
-  if (reportDateLabel) reportDateLabel.textContent = `Date: ${formatDate(now)}`;
 }
 
 function setView(viewId) {
@@ -1821,6 +1830,30 @@ function getTodayAttendance() {
   return attendanceCache.find((item) => item.date === today) || null;
 }
 
+function getAttendanceByDate(dateStr) {
+  const date = String(dateStr || '').trim();
+  if (!date) return null;
+  return attendanceCache.find((item) => item.date === date) || null;
+}
+
+function initReportDatePicker() {
+  if (!reportDateInput) return;
+  const today = isoToday();
+  reportDateInput.max = today;
+  if (!isValidIsoDate(reportDateInput.value)) reportDateInput.value = today;
+
+  reportDateInput.addEventListener('change', () => {
+    const selected = String(reportDateInput.value || '').trim();
+    if (!isValidIsoDate(selected)) {
+      reportDateInput.value = today;
+    } else if (selected > today) {
+      alert('Report date cannot be in the future.');
+      reportDateInput.value = today;
+    }
+    updateReportContext();
+  });
+}
+
 function updateReportContext() {
   if (!currentUser) return;
   if (reportEmpName) reportEmpName.textContent = currentUser.name || '--';
@@ -1830,14 +1863,18 @@ function updateReportContext() {
   if (reportSubmittedName) reportSubmittedName.textContent = currentUser.name || '--';
   if (reportSubmittedPosition) reportSubmittedPosition.textContent = currentUser.position || 'Staff';
 
-  const record = getTodayAttendance();
+  const reportDateIso = getSelectedReportDate();
+  if (reportDateLabel) {
+    reportDateLabel.textContent = `Date: ${formatDate(new Date(`${reportDateIso}T12:00:00`))}`;
+  }
+
+  const record = getAttendanceByDate(reportDateIso);
   const inAm = record ? (record.timeInAM || record.timeIn || '--') : '--';
   const outAm = record ? (record.timeOutAM || '--') : '--';
   const inPm = record ? (record.timeInPM || '--') : '--';
   const outPm = record ? (record.timeOutPM || record.timeOut || '--') : '--';
   if (reportLogDate) {
-    const now = new Date();
-    reportLogDate.textContent = formatDate(now);
+    reportLogDate.textContent = formatDate(new Date(`${reportDateIso}T12:00:00`));
   }
   if (reportLogTimes) {
     reportLogTimes.innerHTML = `
@@ -2237,6 +2274,7 @@ async function startEmployeeSession(user) {
   empRole.textContent = `${currentUser.position} · ${currentUser.office}`;
 
   await loadAttendance();
+  initReportDatePicker();
   computeStats();
   filterRecordsByMonth();
   updateReportContext();
@@ -2585,6 +2623,8 @@ async function handleConcern(event) {
 
 function resetReportForm() {
   if (reportForm) reportForm.reset();
+  if (reportDateInput) reportDateInput.value = isoToday();
+  updateReportContext();
 }
 
 async function handleDailyReport(event) {
@@ -2599,7 +2639,18 @@ async function handleDailyReport(event) {
     alert('Please write your daily report first.');
     return;
   }
-  const record = getTodayAttendance();
+  const selectedReportDate = String(formData.get('reportDate') || '').trim() || getSelectedReportDate();
+  const today = isoToday();
+  if (!isValidIsoDate(selectedReportDate)) {
+    alert('Please select a valid report date.');
+    return;
+  }
+  if (selectedReportDate > today) {
+    alert('Report date cannot be in the future.');
+    return;
+  }
+
+  const record = getAttendanceByDate(selectedReportDate);
   const timeLogs = record
     ? {
         timeInAM: record.timeInAM || record.timeIn || '',
@@ -2626,7 +2677,7 @@ async function handleDailyReport(event) {
         employeeId: currentUser.id,
         employeeName: currentUser.name,
         office: currentUser.office,
-        reportDate: isoToday(),
+        reportDate: selectedReportDate,
         summary,
         timeLogs
       })
