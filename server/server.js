@@ -106,6 +106,7 @@ const LOGIN_ATTEMPT_MAX = Math.max(3, Number(process.env.LOGIN_ATTEMPT_MAX || 5)
 const LOGIN_LOCKOUT_MS = Math.max(5 * 60 * 1000, Number(process.env.LOGIN_LOCKOUT_MS || 15 * 60 * 1000));
 const adminSessions = new Map();
 const loginAttempts = new Map();
+const pendingAdminLogins = new Map();
 
 const REVERSE_GEOCODE_CACHE_TTL_MS = Math.max(0, Number(process.env.REVERSE_GEOCODE_CACHE_TTL_MS || 5 * 60 * 1000));
 const REVERSE_GEOCODE_CACHE_LIMIT = Math.max(50, Number(process.env.REVERSE_GEOCODE_CACHE_LIMIT || 2000));
@@ -142,6 +143,7 @@ const LOCAL_BARANGAY_EDGE_OVERRIDE_DISTANCE_METERS = Math.max(
 );
 
 const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'M@rinduque!2026#Admin');
+const DEFAULT_ADMIN_EMAIL = normalizeEmail(process.env.ADMIN_EMAIL || process.env.BREVO_FROM || 'sdo.marinduque001@gmail.com');
 
 const DEFAULT_DB = {
   admins: [
@@ -150,6 +152,7 @@ const DEFAULT_DB = {
       name: 'SDO Admin',
       username: 'admin',
       password: DEFAULT_ADMIN_PASSWORD,
+      email: DEFAULT_ADMIN_EMAIL,
       office: 'ICT Unit'
     }
   ],
@@ -274,6 +277,20 @@ function migratePasswordsInDb(db) {
   return changed;
 }
 
+function migrateAdminEmailsInDb(db) {
+  let changed = false;
+  for (const admin of db.admins || []) {
+    if (!admin || typeof admin !== 'object') continue;
+    const desiredEmail = resolveAdminEmail(admin);
+    if (!desiredEmail) continue;
+    const currentEmail = normalizeEmail(admin.email || '');
+    if (currentEmail === desiredEmail) continue;
+    admin.email = desiredEmail;
+    changed = true;
+  }
+  return changed;
+}
+
 function syncAdminPasswordInDb(db, password) {
   const desiredPassword = securePasswordValue(password);
   if (!desiredPassword) return false;
@@ -333,6 +350,13 @@ function cleanExpiredAdminSessions() {
   }
 }
 
+function cleanExpiredPendingAdminLogins() {
+  const now = Date.now();
+  for (const [token, challenge] of pendingAdminLogins.entries()) {
+    if (!challenge || challenge.expiresAt <= now) pendingAdminLogins.delete(token);
+  }
+}
+
 function createAdminSession(admin) {
   cleanExpiredAdminSessions();
   const token = crypto.randomBytes(24).toString('hex');
@@ -347,6 +371,54 @@ function createAdminSession(admin) {
     expiresAt: now + ADMIN_SESSION_TTL_MS
   });
   return token;
+}
+
+function resolveAdminEmail(admin) {
+  const source = admin && typeof admin === 'object' ? admin : {};
+  const email = normalizeEmail(source.email || source.username || DEFAULT_ADMIN_EMAIL);
+  return isEmailAddress(email) ? email : '';
+}
+
+function createAdminLoginChallenge(admin, clientIp) {
+  cleanExpiredPendingAdminLogins();
+  const email = resolveAdminEmail(admin);
+  if (!email) {
+    return { ok: false, message: 'Admin email is not configured.' };
+  }
+  const token = crypto.randomBytes(24).toString('hex');
+  const otp = generateOtp();
+  const now = Date.now();
+  const challenge = {
+    token,
+    adminId: String(admin && admin.id ? admin.id : ''),
+    username: String(admin && admin.username ? admin.username : ''),
+    name: String(admin && admin.name ? admin.name : ''),
+    office: String(admin && admin.office ? admin.office : ''),
+    email,
+    otp,
+    clientIp: String(clientIp || ''),
+    createdAt: now,
+    expiresAt: now + 10 * 60 * 1000
+  };
+  pendingAdminLogins.set(token, challenge);
+  return { ok: true, challenge };
+}
+
+function getPendingAdminLogin(token) {
+  cleanExpiredPendingAdminLogins();
+  const challenge = pendingAdminLogins.get(String(token || '').trim());
+  if (!challenge) return null;
+  if (challenge.expiresAt <= Date.now()) {
+    pendingAdminLogins.delete(challenge.token);
+    return null;
+  }
+  return challenge;
+}
+
+function clearPendingAdminLogin(token) {
+  const key = String(token || '').trim();
+  if (!key) return;
+  pendingAdminLogins.delete(key);
 }
 
 function getAdminSession(req) {
@@ -458,9 +530,11 @@ async function ensureSchema() {
       name TEXT NOT NULL,
       username TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
+      email TEXT,
       office TEXT NOT NULL
     );`
   );
+  await pgQuery('ALTER TABLE admins ADD COLUMN IF NOT EXISTS email TEXT;');
   await pgQuery(
     `CREATE TABLE IF NOT EXISTS employees (
       id TEXT PRIMARY KEY,
@@ -564,11 +638,12 @@ async function ensureSchema() {
   if (Number(adminCheck.rows[0].count) === 0) {
     const admin = DEFAULT_DB.admins[0];
     await pgQuery(
-      'INSERT INTO admins (id, name, username, password, office) VALUES ($1, $2, $3, $4, $5)',
-      [admin.id, admin.name, admin.username, securePasswordValue(admin.password), admin.office]
+      'INSERT INTO admins (id, name, username, password, email, office) VALUES ($1, $2, $3, $4, $5, $6)',
+      [admin.id, admin.name, admin.username, securePasswordValue(admin.password), resolveAdminEmail(admin), admin.office]
     );
   }
   await migratePgPasswords();
+  await migratePgAdminEmails();
 }
 
 async function migratePgPasswords() {
@@ -586,6 +661,19 @@ async function migratePgPasswords() {
   for (const row of employeeRes.rows || []) {
     if (!row || isPasswordHash(row.password)) continue;
     await pgQuery('UPDATE employees SET password = $1 WHERE id = $2', [securePasswordValue(row.password), row.id]);
+  }
+}
+
+async function migratePgAdminEmails() {
+  if (!USE_PG) return;
+  const adminRes = await pgQuery('SELECT id, username, email FROM admins');
+  for (const row of adminRes.rows || []) {
+    if (!row) continue;
+    const desiredEmail = resolveAdminEmail(row);
+    if (!desiredEmail) continue;
+    const currentEmail = normalizeEmail(row.email || '');
+    if (currentEmail === desiredEmail) continue;
+    await pgQuery('UPDATE admins SET email = $1 WHERE id = $2', [desiredEmail, row.id]);
   }
 }
 
@@ -629,6 +717,7 @@ function mapAdminRow(row) {
     name: row.name,
     username: row.username,
     password: row.password,
+    email: row.email || '',
     office: row.office
   };
 }
@@ -738,6 +827,7 @@ function normalizeDb(db) {
   }
   migrateEmpIdsToSdo(safe);
   migratePasswordsInDb(safe);
+  migrateAdminEmailsInDb(safe);
   return safe;
 }
 
@@ -3009,17 +3099,19 @@ function getSeedAttendance(date) {
   ];
 }
 
-async function sendOtpEmail(to, code) {
+async function sendOtpEmail(to, code, options = {}) {
   const config = getBrevoConfig();
   if (!config) {
     return { ok: false, reason: 'Brevo not configured (missing BREVO_API_KEY or BREVO_FROM)' };
   }
+  const subject = String(options.subject || 'SDO Attendance OTP Verification').trim();
+  const purposeLabel = String(options.purposeLabel || 'OTP code').trim();
   const payload = {
     sender: { name: config.fromName, email: config.fromEmail },
     to: [{ email: to }],
-    subject: 'SDO Attendance OTP Verification',
-    textContent: `Your OTP code is ${code}. It expires in 10 minutes.`,
-    htmlContent: `<p>Your OTP code is <strong>${code}</strong>. It expires in 10 minutes.</p>`
+    subject,
+    textContent: `Your ${purposeLabel} is ${code}. It expires in 10 minutes.`,
+    htmlContent: `<p>Your ${purposeLabel} is <strong>${code}</strong>. It expires in 10 minutes.</p>`
   };
   const res = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
@@ -3044,10 +3136,10 @@ function otpDeliveryFailureMessage() {
   return 'OTP email could not be delivered right now. Please try again in a moment or contact admin.';
 }
 
-async function deliverOtpCode(email, otp) {
+async function deliverOtpCode(email, otp, options = {}) {
   let emailError = '';
   try {
-    const mailResult = await sendOtpEmail(email, otp);
+    const mailResult = await sendOtpEmail(email, otp, options);
     if (!mailResult.ok) {
       emailError = mailResult.reason || 'Email request failed';
     }
@@ -3814,10 +3906,14 @@ async function handleApiPg(req, res, pathname) {
     const name = String(body.name || '').trim();
     const username = String(body.username || '').trim();
     const password = String(body.password || '').trim();
+    const email = normalizeEmail(body.email || '');
     const office = String(body.office || '').trim();
 
-    if (!name || !username || !password || !office) {
+    if (!name || !username || !password || !email || !office) {
       return sendJson(res, 400, { ok: false, message: 'All fields are required.' });
+    }
+    if (!isEmailAddress(email)) {
+      return sendJson(res, 400, { ok: false, message: 'A valid email address is required.' });
     }
 
     const existing = await pgQuery('SELECT 1 FROM admins WHERE LOWER(username) = LOWER($1)', [username]);
@@ -3831,11 +3927,12 @@ async function handleApiPg(req, res, pathname) {
       name,
       username,
       password: securePasswordValue(password),
+      email,
       office
     };
     await pgQuery(
-      'INSERT INTO admins (id, name, username, password, office) VALUES ($1, $2, $3, $4, $5)',
-      [newAdmin.id, newAdmin.name, newAdmin.username, newAdmin.password, newAdmin.office]
+      'INSERT INTO admins (id, name, username, password, email, office) VALUES ($1, $2, $3, $4, $5, $6)',
+      [newAdmin.id, newAdmin.name, newAdmin.username, newAdmin.password, newAdmin.email, newAdmin.office]
     );
     return sendJson(res, 201, { ok: true, admin: publicAdmin(newAdmin) });
   }
@@ -4076,14 +4173,33 @@ async function handleApiPg(req, res, pathname) {
       const admin = mapAdminRow(adminRes.rows[0]);
       if (verifyPassword(password, admin.password)) {
         clearLoginFailures(username, clientIp);
-        const sessionToken = createAdminSession(admin);
-        const session = adminSessions.get(sessionToken);
-        return sendJson(
-          res,
-          200,
-          { ok: true, user: publicAdmin(adminRes.rows[0]), role: 'admin' },
-          { 'Set-Cookie': buildAdminSessionCookie(sessionToken, session.expiresAt) }
-        );
+        const challenge = createAdminLoginChallenge(admin, clientIp);
+        if (!challenge.ok) {
+          return sendJson(res, 400, { ok: false, message: challenge.message || 'Admin OTP login could not be started.' });
+        }
+        return deliverOtpCode(challenge.challenge.email, challenge.challenge.otp, {
+          subject: 'SDO Attendance Admin Login OTP',
+          purposeLabel: 'admin login OTP'
+        }).then((delivery) => {
+          if (!delivery.emailSent && OTP_EMAIL_REQUIRED) {
+            clearPendingAdminLogin(challenge.challenge.token);
+            return sendJson(res, 503, {
+              ok: false,
+              emailSent: false,
+              emailError: delivery.emailError,
+              message: otpDeliveryFailureMessage()
+            });
+          }
+          return sendJson(res, 200, {
+            ok: true,
+            otpRequired: true,
+            loginToken: challenge.challenge.token,
+            devOtp: delivery.devOtp,
+            emailSent: delivery.emailSent,
+            emailError: delivery.emailError,
+            message: 'OTP sent to your admin email.'
+          });
+        });
       }
     }
 
@@ -4114,6 +4230,46 @@ async function handleApiPg(req, res, pathname) {
     }
     clearLoginFailures(username, clientIp);
     return sendJson(res, 200, { ok: true, user: publicEmployee(emp), role: 'employee' });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/login/verify') {
+    const body = await collectBody(req);
+    const loginToken = String(body.loginToken || body.token || '').trim();
+    const otp = String(body.otp || '').trim();
+    const clientIp = String(req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : '').trim();
+    if (!loginToken || !otp) {
+      return sendJson(res, 400, { ok: false, message: 'Login token and OTP are required.' });
+    }
+    const challenge = getPendingAdminLogin(loginToken);
+    if (!challenge) {
+      return sendJson(res, 400, { ok: false, message: 'OTP expired. Please log in again.' });
+    }
+    if (challenge.clientIp && clientIp && challenge.clientIp !== clientIp) {
+      clearPendingAdminLogin(loginToken);
+      return sendJson(res, 403, { ok: false, message: 'OTP verification failed. Please log in again.' });
+    }
+    if (challenge.otp !== otp) {
+      return sendJson(res, 400, { ok: false, message: 'Invalid OTP.' });
+    }
+    const adminRes = await pgQuery('SELECT * FROM admins WHERE id = $1 OR LOWER(username) = LOWER($2)', [
+      challenge.adminId,
+      challenge.username
+    ]);
+    if (!adminRes.rows.length) {
+      clearPendingAdminLogin(loginToken);
+      return sendJson(res, 404, { ok: false, message: 'Admin account not found.' });
+    }
+    clearPendingAdminLogin(loginToken);
+    clearLoginFailures(adminRes.rows[0].username, clientIp);
+    const admin = mapAdminRow(adminRes.rows[0]);
+    const sessionToken = createAdminSession(admin);
+    const session = adminSessions.get(sessionToken);
+    return sendJson(
+      res,
+      200,
+      { ok: true, user: publicAdmin(admin), role: 'admin' },
+      { 'Set-Cookie': buildAdminSessionCookie(sessionToken, session.expiresAt) }
+    );
   }
 
   if (req.method === 'POST' && pathname === '/api/logout') {
@@ -4857,10 +5013,14 @@ async function handleApi(req, res, pathname) {
       const name = String(body.name || '').trim();
       const username = String(body.username || '').trim();
       const password = String(body.password || '').trim();
+      const email = normalizeEmail(body.email || '');
       const office = String(body.office || '').trim();
 
-      if (!name || !username || !password || !office) {
+      if (!name || !username || !password || !email || !office) {
         return sendJson(res, 400, { ok: false, message: 'All fields are required.' });
+      }
+      if (!isEmailAddress(email)) {
+        return sendJson(res, 400, { ok: false, message: 'A valid email address is required.' });
       }
 
       const existing = db.admins.find((a) => a.username.toLowerCase() === username.toLowerCase());
@@ -4873,6 +5033,7 @@ async function handleApi(req, res, pathname) {
         name,
         username,
         password: securePasswordValue(password),
+        email,
         office
       };
       db.admins.push(newAdmin);
@@ -5094,14 +5255,33 @@ async function handleApi(req, res, pathname) {
       const admin = db.admins.find((a) => a.username.toLowerCase() === username.toLowerCase());
       if (verifyPassword(password, admin.password)) {
         clearLoginFailures(username, clientIp);
-        const sessionToken = createAdminSession(admin);
-        const session = adminSessions.get(sessionToken);
-        return sendJson(
-          res,
-          200,
-          { ok: true, user: publicAdmin(admin), role: 'admin' },
-          { 'Set-Cookie': buildAdminSessionCookie(sessionToken, session.expiresAt) }
-        );
+        const challenge = createAdminLoginChallenge(admin, clientIp);
+        if (!challenge.ok) {
+          return sendJson(res, 400, { ok: false, message: challenge.message || 'Admin OTP login could not be started.' });
+        }
+        return deliverOtpCode(challenge.challenge.email, challenge.challenge.otp, {
+          subject: 'SDO Attendance Admin Login OTP',
+          purposeLabel: 'admin login OTP'
+        }).then((delivery) => {
+          if (!delivery.emailSent && OTP_EMAIL_REQUIRED) {
+            clearPendingAdminLogin(challenge.challenge.token);
+            return sendJson(res, 503, {
+              ok: false,
+              emailSent: false,
+              emailError: delivery.emailError,
+              message: otpDeliveryFailureMessage()
+            });
+          }
+          return sendJson(res, 200, {
+            ok: true,
+            otpRequired: true,
+            loginToken: challenge.challenge.token,
+            devOtp: delivery.devOtp,
+            emailSent: delivery.emailSent,
+            emailError: delivery.emailError,
+            message: 'OTP sent to your admin email.'
+          });
+        });
       }
 
       const lookup = username.toLowerCase();
@@ -5129,6 +5309,44 @@ async function handleApi(req, res, pathname) {
       }
       clearLoginFailures(username, clientIp);
       return sendJson(res, 200, { ok: true, user: publicEmployee(emp), role: 'employee' });
+    });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/admin/login/verify') {
+    return collectBody(req).then((body) => {
+      const loginToken = String(body.loginToken || body.token || '').trim();
+      const otp = String(body.otp || '').trim();
+      const clientIp = String(req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : '').trim();
+      if (!loginToken || !otp) {
+        return sendJson(res, 400, { ok: false, message: 'Login token and OTP are required.' });
+      }
+      const challenge = getPendingAdminLogin(loginToken);
+      if (!challenge) {
+        return sendJson(res, 400, { ok: false, message: 'OTP expired. Please log in again.' });
+      }
+      if (challenge.clientIp && clientIp && challenge.clientIp !== clientIp) {
+        clearPendingAdminLogin(loginToken);
+        return sendJson(res, 403, { ok: false, message: 'OTP verification failed. Please log in again.' });
+      }
+      if (challenge.otp !== otp) {
+        return sendJson(res, 400, { ok: false, message: 'Invalid OTP.' });
+      }
+      const db = readDb();
+      const admin = db.admins.find((a) => String(a.id || '') === challenge.adminId || String(a.username || '').toLowerCase() === challenge.username.toLowerCase());
+      if (!admin) {
+        clearPendingAdminLogin(loginToken);
+        return sendJson(res, 404, { ok: false, message: 'Admin account not found.' });
+      }
+      clearPendingAdminLogin(loginToken);
+      clearLoginFailures(admin.username, clientIp);
+      const sessionToken = createAdminSession(admin);
+      const session = adminSessions.get(sessionToken);
+      return sendJson(
+        res,
+        200,
+        { ok: true, user: publicAdmin(admin), role: 'admin' },
+        { 'Set-Cookie': buildAdminSessionCookie(sessionToken, session.expiresAt) }
+      );
     });
   }
 

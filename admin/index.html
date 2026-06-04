@@ -413,6 +413,10 @@
             </select>
           </label>
           <label>
+            Email
+            <input type="email" name="email" placeholder="Enter email" required />
+          </label>
+          <label>
             Username
             <input type="text" name="username" required />
           </label>
@@ -446,6 +450,26 @@
           <div class="modal-actions">
             <button class="primary-btn" type="submit">Update</button>
             <button class="ghost-btn" type="button" id="cancel-admin-forgot">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="admin-otp-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="card-header">
+          <h3>Verify Admin Login</h3>
+          <button class="icon-btn" id="close-admin-otp" aria-label="Close">&times;</button>
+        </div>
+        <p class="modal-subtitle" id="admin-otp-message">We sent a one-time code to your email.</p>
+        <form id="admin-otp-form" class="form-grid two">
+          <label>
+            OTP
+            <input type="text" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required />
+          </label>
+          <div class="modal-actions">
+            <button class="primary-btn" type="submit">Verify</button>
+            <button class="ghost-btn" type="button" id="cancel-admin-otp">Cancel</button>
           </div>
         </form>
       </div>

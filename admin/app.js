@@ -47,6 +47,9 @@ const adminRegisterModal = document.getElementById('admin-register-modal');
 const adminRegisterForm = document.getElementById('admin-register-form');
 const adminForgotModal = document.getElementById('admin-forgot-modal');
 const adminForgotForm = document.getElementById('admin-forgot-form');
+const adminOtpModal = document.getElementById('admin-otp-modal');
+const adminOtpForm = document.getElementById('admin-otp-form');
+const adminOtpMessage = document.getElementById('admin-otp-message');
 const notifBtn = document.getElementById('notif-btn');
 const notifPanel = document.getElementById('notif-panel');
 const notifList = document.getElementById('notif-list');
@@ -75,6 +78,7 @@ let officeScope = '';
 let reportMap = new Map(); 
 let reportAttestedDrafts = new Map(); 
 let refreshTimer = null; 
+let pendingAdminLoginToken = '';
 const STAT_CACHE_TTL = 45000;
 const statCache = {
   key: '',
@@ -835,6 +839,7 @@ function updateAdminScope(user) {
 }
 
 async function enterAdminArea(user) {
+  closeAdminOtpModal();
   updateAdminScope(user);
   loginScreen.classList.add('hidden'); 
   adminApp.classList.remove('hidden'); 
@@ -1703,6 +1708,49 @@ async function handleAdminForgot(event) {
   }
 }
 
+function openAdminOtpModal(message) {
+  if (adminOtpMessage) {
+    adminOtpMessage.textContent = message || 'We sent a one-time code to your email.';
+  }
+  if (adminOtpForm) {
+    adminOtpForm.reset();
+  }
+  adminOtpModal.classList.remove('hidden');
+}
+
+function closeAdminOtpModal() {
+  pendingAdminLoginToken = '';
+  adminOtpModal.classList.add('hidden');
+  if (adminOtpForm) {
+    adminOtpForm.reset();
+  }
+  if (adminOtpMessage) {
+    adminOtpMessage.textContent = 'We sent a one-time code to your email.';
+  }
+}
+
+async function handleAdminOtp(event) {
+  event.preventDefault();
+  const formData = new FormData(adminOtpForm);
+  const otp = String(formData.get('otp') || '').trim();
+  if (!pendingAdminLoginToken) {
+    alert('Please log in again.');
+    closeAdminOtpModal();
+    return;
+  }
+  try {
+    const result = await api('/api/admin/login/verify', {
+      method: 'POST',
+      body: JSON.stringify({ loginToken: pendingAdminLoginToken, otp })
+    });
+    pendingAdminLoginToken = '';
+    closeAdminOtpModal();
+    await enterAdminArea(result && result.user ? result.user : null);
+  } catch (err) {
+    alert(err.message || 'OTP verification failed.');
+  }
+}
+
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => {
@@ -1759,6 +1807,14 @@ loginForm.addEventListener('submit', async (event) => {
       method: 'POST', 
       body: JSON.stringify({ role: 'admin', username, password }) 
     }); 
+    if (result && result.otpRequired) {
+      pendingAdminLoginToken = String(result.loginToken || '').trim();
+      if (!pendingAdminLoginToken) {
+        throw new Error('OTP login could not start.');
+      }
+      openAdminOtpModal(result.message || 'We sent a one-time code to your admin email.');
+      return;
+    }
     await enterAdminArea(result && result.user ? result.user : null);
   } catch (err) {
     if (err.name === 'TypeError') {
@@ -1880,6 +1936,10 @@ document.getElementById('open-admin-forgot').addEventListener('click', openAdmin
 document.getElementById('close-admin-forgot').addEventListener('click', closeAdminForgot);
 document.getElementById('cancel-admin-forgot').addEventListener('click', closeAdminForgot);
 adminForgotForm.addEventListener('submit', handleAdminForgot);
+
+document.getElementById('close-admin-otp').addEventListener('click', closeAdminOtpModal);
+document.getElementById('cancel-admin-otp').addEventListener('click', closeAdminOtpModal);
+adminOtpForm.addEventListener('submit', handleAdminOtp);
 
 if (notifBtn && notifPanel) {
   notifBtn.addEventListener('click', (event) => {

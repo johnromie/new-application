@@ -107,6 +107,7 @@ Use this setup so both web (`/admin`, `/employee`) and API (`/api/*`) run in one
    - `BREVO_API_KEY=<your-brevo-api-key>`
    - `BREVO_FROM=<verified-sender@yourdomain.com>`
    - `BREVO_FROM_NAME=SDO Marinduque Attendance`
+   - `ADMIN_EMAIL=<admin-email-that-receives-login-otp>`
    - `OTP_EMAIL_REQUIRED=true`
    - `ALLOW_DEV_OTP_FALLBACK=false`
    - Optional performance tuning:
@@ -119,6 +120,7 @@ Use this setup so both web (`/admin`, `/employee`) and API (`/api/*`) run in one
 Important:
 - Use `../persistent-data/...` (with `../`), not `./persistent-data/...`.
 - `./persistent-data` can point inside deploy files and may be reset on redeploy.
+- Admin login now sends a one-time code to `ADMIN_EMAIL` on every successful password check.
 - For higher concurrency (many simultaneous users), prefer `DB_MODE=postgres` with a managed PostgreSQL database.
 
 ## PostgreSQL Migration (Recommended for High Traffic)
