@@ -141,13 +141,15 @@ const LOCAL_BARANGAY_EDGE_OVERRIDE_DISTANCE_METERS = Math.max(
   Number(process.env.LOCAL_BARANGAY_EDGE_OVERRIDE_DISTANCE_METERS || 500)
 );
 
+const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'M@rinduque!2026#Admin');
+
 const DEFAULT_DB = {
   admins: [
     {
       id: 'ADM-001',
       name: 'SDO Admin',
       username: 'admin',
-      password: 'admin123',
+      password: DEFAULT_ADMIN_PASSWORD,
       office: 'ICT Unit'
     }
   ],
