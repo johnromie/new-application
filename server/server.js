@@ -374,6 +374,32 @@ function mapAdminRow(row) {
   };
 }
 
+function publicEmployee(employee) {
+  const source = employee && typeof employee === 'object' ? employee : {};
+  return {
+    id: String(source.id || ''),
+    name: String(source.name || ''),
+    position: String(source.position || ''),
+    office: String(source.office || ''),
+    email: String(source.email || ''),
+    username: String(source.username || ''),
+    employeeType: String(source.employeeType || source.employee_type || 'Regular') || 'Regular',
+    status: String(source.status || ''),
+    avatar: String(source.avatar || ''),
+    verified: source.verified === true
+  };
+}
+
+function publicAdmin(admin) {
+  const source = admin && typeof admin === 'object' ? admin : {};
+  return {
+    id: String(source.id || ''),
+    name: String(source.name || ''),
+    username: String(source.username || ''),
+    office: String(source.office || '')
+  };
+}
+
 function mapAttendanceRow(row) {
   const record = {
     id: row.id,
@@ -788,6 +814,14 @@ function sendFile(res, filePath) {
     res.end('Unable to read file.');
   });
   stream.pipe(res);
+}
+
+function resolveSafeStaticFile(baseDir, requestPath, fallbackFile) {
+  const rawPath = String(requestPath || '').replace(/^\/+/, '').replace(/\/+$/, '');
+  const relativePath = rawPath || fallbackFile;
+  const resolvedPath = path.resolve(baseDir, relativePath);
+  if (!isPathInside(baseDir, resolvedPath)) return '';
+  return resolvedPath;
 }
 
 function collectBody(req) {
@@ -3195,7 +3229,7 @@ async function handleApiPg(req, res, pathname) {
     const result = officeScope
       ? await pgQuery('SELECT * FROM employees WHERE office = $1 ORDER BY id', [officeScope])
       : await pgQuery('SELECT * FROM employees ORDER BY id'); 
-    return sendJson(res, 200, { employees: result.rows.map(mapEmployeeRow) }); 
+    return sendJson(res, 200, { employees: result.rows.map((row) => publicEmployee(mapEmployeeRow(row))) }); 
   } 
 
   if (req.method === 'GET' && pathname === '/api/notifications') {
@@ -3382,7 +3416,7 @@ async function handleApiPg(req, res, pathname) {
         newEmp.otpExpiresAt
       ]
     ); 
-    return sendJson(res, 201, { employee: newEmp }); 
+    return sendJson(res, 201, { employee: publicEmployee(newEmp) }); 
   } 
 
   if (req.method === 'POST' && pathname === '/api/employees/update') { 
@@ -3398,7 +3432,7 @@ async function handleApiPg(req, res, pathname) {
     } 
     await pgQuery('UPDATE employees SET position = $1 WHERE id = $2', [position, employeeId]); 
     const updated = await pgQuery('SELECT * FROM employees WHERE id = $1', [employeeId]); 
-    return sendJson(res, 200, { ok: true, employee: mapEmployeeRow(updated.rows[0]) }); 
+    return sendJson(res, 200, { ok: true, employee: publicEmployee(mapEmployeeRow(updated.rows[0])) }); 
   } 
  
   if (req.method === 'POST' && pathname === '/api/employees/delete') { 
@@ -3413,7 +3447,7 @@ async function handleApiPg(req, res, pathname) {
     }
     await pgQuery('UPDATE employees SET status = $1 WHERE id = $2', ['Deleted', employeeId]);
     const updated = await pgQuery('SELECT * FROM employees WHERE id = $1', [employeeId]);
-    return sendJson(res, 200, { ok: true, employee: mapEmployeeRow(updated.rows[0]) });
+    return sendJson(res, 200, { ok: true, employee: publicEmployee(mapEmployeeRow(updated.rows[0])) });
   }
 
   if (req.method === 'POST' && pathname === '/api/employees/restore') {
@@ -3428,7 +3462,7 @@ async function handleApiPg(req, res, pathname) {
     }
     await pgQuery('UPDATE employees SET status = $1 WHERE id = $2', ['Active', employeeId]);
     const updated = await pgQuery('SELECT * FROM employees WHERE id = $1', [employeeId]);
-    return sendJson(res, 200, { ok: true, employee: mapEmployeeRow(updated.rows[0]) });
+    return sendJson(res, 200, { ok: true, employee: publicEmployee(mapEmployeeRow(updated.rows[0])) });
   }
 
   if (req.method === 'POST' && pathname === '/api/admin/register') {
@@ -3459,7 +3493,7 @@ async function handleApiPg(req, res, pathname) {
       'INSERT INTO admins (id, name, username, password, office) VALUES ($1, $2, $3, $4, $5)',
       [newAdmin.id, newAdmin.name, newAdmin.username, newAdmin.password, newAdmin.office]
     );
-    return sendJson(res, 201, { ok: true, admin: newAdmin });
+    return sendJson(res, 201, { ok: true, admin: publicAdmin(newAdmin) });
   }
 
   if (req.method === 'POST' && pathname === '/api/register') {
@@ -3526,7 +3560,7 @@ async function handleApiPg(req, res, pathname) {
       }
       return sendJson(res, 200, {
         ok: true,
-        employee: existing,
+        employee: publicEmployee(existing),
         devOtp: delivery.devOtp,
         emailSent: delivery.emailSent,
         emailError: delivery.emailError,
@@ -3585,7 +3619,7 @@ async function handleApiPg(req, res, pathname) {
 
     return sendJson(res, 201, {
       ok: true,
-      employee: newEmp,
+      employee: publicEmployee(newEmp),
       devOtp: delivery.devOtp,
       emailSent: delivery.emailSent,
       emailError: delivery.emailError
@@ -3692,7 +3726,7 @@ async function handleApiPg(req, res, pathname) {
     if (adminRes.rows.length) {
       const admin = mapAdminRow(adminRes.rows[0]);
       if (admin.password === password) {
-        return sendJson(res, 200, { ok: true, user: admin, role: 'admin' });
+        return sendJson(res, 200, { ok: true, user: publicAdmin(adminRes.rows[0]), role: 'admin' });
       }
     }
 
@@ -3718,7 +3752,7 @@ async function handleApiPg(req, res, pathname) {
         identifier: emp.email || emp.username || emp.id || username
       });
     }
-    return sendJson(res, 200, { ok: true, user: emp, role: 'employee' });
+    return sendJson(res, 200, { ok: true, user: publicEmployee(emp), role: 'employee' });
   }
 
   if (req.method === 'GET' && pathname === '/api/attendance/today') { 
@@ -4199,7 +4233,7 @@ async function handleApi(req, res, pathname) {
     const query = url.parse(req.url, true).query; 
     const officeScope = normalizeDivisionOfficeScope(query.office);
     const list = officeScope ? (db.employees || []).filter((e) => String(e.office || '') === officeScope) : (db.employees || []);
-    return sendJson(res, 200, { employees: list }); 
+    return sendJson(res, 200, { employees: list.map((employee) => publicEmployee(employee)) }); 
   } 
 
   if (req.method === 'GET' && pathname === '/api/notifications') {
@@ -4366,7 +4400,7 @@ async function handleApi(req, res, pathname) {
       };
       db.employees.push(newEmp);
       writeDb(db);
-      return sendJson(res, 201, { employee: newEmp }); 
+      return sendJson(res, 201, { employee: publicEmployee(newEmp) }); 
     }); 
   } 
 
@@ -4384,7 +4418,7 @@ async function handleApi(req, res, pathname) {
       } 
       employee.position = position; 
       writeDb(db); 
-      return sendJson(res, 200, { ok: true, employee }); 
+      return sendJson(res, 200, { ok: true, employee: publicEmployee(employee) }); 
     }); 
   } 
  
@@ -4401,7 +4435,7 @@ async function handleApi(req, res, pathname) {
       }
       employee.status = 'Deleted';
       writeDb(db);
-      return sendJson(res, 200, { ok: true, employee });
+      return sendJson(res, 200, { ok: true, employee: publicEmployee(employee) });
     });
   }
 
@@ -4418,7 +4452,7 @@ async function handleApi(req, res, pathname) {
       }
       employee.status = 'Active';
       writeDb(db);
-      return sendJson(res, 200, { ok: true, employee });
+      return sendJson(res, 200, { ok: true, employee: publicEmployee(employee) });
     });
   }
 
@@ -4448,7 +4482,7 @@ async function handleApi(req, res, pathname) {
       };
       db.admins.push(newAdmin);
       writeDb(db);
-      return sendJson(res, 201, { ok: true, admin: newAdmin });
+      return sendJson(res, 201, { ok: true, admin: publicAdmin(newAdmin) });
     });
   }
 
@@ -4498,7 +4532,7 @@ async function handleApi(req, res, pathname) {
         }
         return sendJson(res, 200, {
           ok: true,
-          employee: existing,
+          employee: publicEmployee(existing),
           devOtp: delivery.devOtp,
           emailSent: delivery.emailSent,
           emailError: delivery.emailError,
@@ -4538,7 +4572,7 @@ async function handleApi(req, res, pathname) {
 
       return sendJson(res, 201, {
         ok: true,
-        employee: newEmp,
+        employee: publicEmployee(newEmp),
         devOtp: delivery.devOtp,
         emailSent: delivery.emailSent,
         emailError: delivery.emailError
@@ -4659,7 +4693,7 @@ async function handleApi(req, res, pathname) {
 
       const admin = db.admins.find((a) => a.username.toLowerCase() === username.toLowerCase());
       if (admin && admin.password === password) {
-        return sendJson(res, 200, { ok: true, user: admin, role: 'admin' });
+        return sendJson(res, 200, { ok: true, user: publicAdmin(admin), role: 'admin' });
       }
 
       const lookup = username.toLowerCase();
@@ -4682,7 +4716,7 @@ async function handleApi(req, res, pathname) {
           identifier: emp.email || emp.username || emp.id || username
         });
       }
-      return sendJson(res, 200, { ok: true, user: emp, role: 'employee' });
+      return sendJson(res, 200, { ok: true, user: publicEmployee(emp), role: 'employee' });
     });
   }
 
@@ -4969,8 +5003,12 @@ function routeRequest(req, res) {
 
   if (pathname.startsWith('/admin')) {
     const safePath = pathname.replace('/admin', '').replace(/\/+$/, '');
-    const filePath = safePath === '' || safePath === '/' ? 'index.html' : safePath;
-    return sendFile(res, path.join(ROOT, 'admin', filePath));
+    const filePath = resolveSafeStaticFile(path.join(ROOT, 'admin'), safePath, 'index.html');
+    if (!filePath) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Not Found');
+    }
+    return sendFile(res, filePath);
   }
 
   if (pathname.startsWith('/employee')) {
@@ -4991,11 +5029,16 @@ function routeRequest(req, res) {
       }
     }
     const safePath = pathname.replace('/employee', '').replace(/\/+$/, '');
-    const filePath = safePath === '' || safePath === '/' ? 'index.html' : safePath;
-    return sendFile(res, path.join(ROOT, 'employee', filePath));
+    const filePath = resolveSafeStaticFile(path.join(ROOT, 'employee'), safePath, 'index.html');
+    if (!filePath) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Not Found');
+    }
+    return sendFile(res, filePath);
   }
 
-  return sendFile(res, path.join(ROOT, pathname));
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  return res.end('Not Found');
 }
 
 const app = express();
