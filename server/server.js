@@ -855,6 +855,60 @@ function writeDbFileWithBackup(filePath, backupPath, serializedDb) {
   }
 }
 
+function looksLikeDbSnapshot(value) {
+  if (!value || typeof value !== 'object') return false;
+  return (
+    Array.isArray(value.admins) ||
+    Array.isArray(value.employees) ||
+    Array.isArray(value.attendance) ||
+    Array.isArray(value.reports) ||
+    Array.isArray(value.notifications) ||
+    Array.isArray(value.messages) ||
+    Array.isArray(value.concerns)
+  );
+}
+
+function sanitizeJsonBackupFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return false;
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = parseJsonSafe(raw);
+    if (!parsed.ok || !looksLikeDbSnapshot(parsed.value)) return false;
+
+    const normalized = normalizeDb(parsed.value);
+    const next = JSON.stringify(normalized);
+    if (next === raw.trim()) return false;
+
+    writeFileAtomicSync(filePath, next);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function sanitizeJsonBackupsInDir(dirPath) {
+  if (!dirPath || !fs.existsSync(dirPath)) return 0;
+  let changed = 0;
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch (err) {
+    return 0;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      changed += sanitizeJsonBackupsInDir(fullPath);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const lowerName = String(entry.name || '').toLowerCase();
+    if (!lowerName.endsWith('.json') && !lowerName.endsWith('.bak')) continue;
+    if (sanitizeJsonBackupFile(fullPath)) changed += 1;
+  }
+  return changed;
+}
+
 function readDb() {
   if (memoryDb) return memoryDb;
 
@@ -5444,6 +5498,21 @@ const PORT = process.env.PORT || 5173;
     if (USE_PG) {
       await forcePgFallback(err);
     }
+  }
+  try {
+    const backupFilesSanitized = [
+      sanitizeJsonBackupFile(BACKUP_PATH),
+      sanitizeJsonBackupFile(LEGACY_BACKUP_PATH),
+      sanitizeJsonBackupFile(DB_MIRROR_PATH),
+      sanitizeJsonBackupFile(DB_MIRROR_BACKUP_PATH),
+      sanitizeJsonBackupFile(path.join(DATA_DIR, 'db-concerns-backup.json')),
+      sanitizeJsonBackupsInDir(path.join(DATA_DIR, 'backups'))
+    ].reduce((total, value) => total + (Number(value) || 0), 0);
+    if (backupFilesSanitized > 0) {
+      console.log(`Sanitized ${backupFilesSanitized} database backup file(s).`);
+    }
+  } catch (err) {
+    console.error('Backup sanitization failed:', err.message || err);
   }
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
