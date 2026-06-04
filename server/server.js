@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -98,6 +99,13 @@ const DB_MIRROR_PATH_INSIDE_DEPLOY_ROOT = DB_MIRROR_PATH ? isPathInside(ROOT, DB
 const REQUEST_TIMEOUT_MS = Math.max(5000, Number(process.env.REQUEST_TIMEOUT_MS || 25000));
 const MAX_INFLIGHT_REQUESTS = Math.max(20, Number(process.env.MAX_INFLIGHT_REQUESTS || 200));
 const EXTERNAL_FETCH_TIMEOUT_MS = Math.max(1200, Number(process.env.EXTERNAL_FETCH_TIMEOUT_MS || 4500));
+const ADMIN_SESSION_COOKIE = 'sdo_admin_session';
+const ADMIN_SESSION_TTL_MS = Math.max(60 * 60 * 1000, Number(process.env.ADMIN_SESSION_TTL_MS || 8 * 60 * 60 * 1000));
+const LOGIN_ATTEMPT_WINDOW_MS = Math.max(60 * 1000, Number(process.env.LOGIN_ATTEMPT_WINDOW_MS || 10 * 60 * 1000));
+const LOGIN_ATTEMPT_MAX = Math.max(3, Number(process.env.LOGIN_ATTEMPT_MAX || 5));
+const LOGIN_LOCKOUT_MS = Math.max(5 * 60 * 1000, Number(process.env.LOGIN_LOCKOUT_MS || 15 * 60 * 1000));
+const adminSessions = new Map();
+const loginAttempts = new Map();
 
 const REVERSE_GEOCODE_CACHE_TTL_MS = Math.max(0, Number(process.env.REVERSE_GEOCODE_CACHE_TTL_MS || 5 * 60 * 1000));
 const REVERSE_GEOCODE_CACHE_LIMIT = Math.max(50, Number(process.env.REVERSE_GEOCODE_CACHE_LIMIT || 2000));
@@ -198,6 +206,139 @@ function parseJsonSafe(raw) {
   } catch (err) {
     return { ok: false, error: err };
   }
+}
+
+function parseCookies(req) {
+  const header = String(req && req.headers && req.headers.cookie ? req.headers.cookie : '');
+  const cookies = {};
+  header.split(';').forEach((part) => {
+    const index = part.indexOf('=');
+    if (index <= 0) return;
+    const key = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+    if (!key) return;
+    try {
+      cookies[key] = decodeURIComponent(value);
+    } catch (err) {
+      cookies[key] = value;
+    }
+  });
+  return cookies;
+}
+
+function buildCookie(name, value, options = {}) {
+  const parts = [`${name}=${encodeURIComponent(value)}`];
+  parts.push(`Path=${options.path || '/'}`);
+  if (options.maxAge !== undefined) parts.push(`Max-Age=${Math.floor(Number(options.maxAge) / 1000)}`);
+  if (options.expires) parts.push(`Expires=${new Date(options.expires).toUTCString()}`);
+  if (options.httpOnly !== false) parts.push('HttpOnly');
+  if (options.sameSite) parts.push(`SameSite=${options.sameSite}`);
+  if (options.secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function cleanExpiredAdminSessions() {
+  const now = Date.now();
+  for (const [token, session] of adminSessions.entries()) {
+    if (!session || session.expiresAt <= now) adminSessions.delete(token);
+  }
+}
+
+function createAdminSession(admin) {
+  cleanExpiredAdminSessions();
+  const token = crypto.randomBytes(24).toString('hex');
+  const now = Date.now();
+  adminSessions.set(token, {
+    token,
+    adminId: String(admin && admin.id ? admin.id : ''),
+    name: String(admin && admin.name ? admin.name : ''),
+    username: String(admin && admin.username ? admin.username : ''),
+    office: String(admin && admin.office ? admin.office : ''),
+    createdAt: now,
+    expiresAt: now + ADMIN_SESSION_TTL_MS
+  });
+  return token;
+}
+
+function getAdminSession(req) {
+  cleanExpiredAdminSessions();
+  const cookies = parseCookies(req);
+  const token = String(cookies[ADMIN_SESSION_COOKIE] || '').trim();
+  if (!token) return null;
+  const session = adminSessions.get(token);
+  if (!session) return null;
+  if (session.expiresAt <= Date.now()) {
+    adminSessions.delete(token);
+    return null;
+  }
+  return session;
+}
+
+function clearAdminSession(req) {
+  const cookies = parseCookies(req);
+  const token = String(cookies[ADMIN_SESSION_COOKIE] || '').trim();
+  if (token) adminSessions.delete(token);
+}
+
+function buildAdminSessionCookie(token, expiresAt) {
+  return buildCookie(ADMIN_SESSION_COOKIE, token, {
+    path: '/',
+    maxAge: Math.max(0, expiresAt - Date.now()),
+    httpOnly: true,
+    sameSite: 'Lax',
+    secure: IS_PRODUCTION
+  });
+}
+
+function buildClearedAdminSessionCookie() {
+  return buildCookie(ADMIN_SESSION_COOKIE, '', {
+    path: '/',
+    maxAge: 0,
+    expires: 0,
+    httpOnly: true,
+    sameSite: 'Lax',
+    secure: IS_PRODUCTION
+  });
+}
+
+function getLoginBucketKey(username, ip) {
+  return `${String(ip || 'unknown').trim().toLowerCase()}|${String(username || '').trim().toLowerCase()}`;
+}
+
+function getLoginBucket(username, ip) {
+  const key = getLoginBucketKey(username, ip);
+  const now = Date.now();
+  const bucket = loginAttempts.get(key);
+  if (!bucket) {
+    const fresh = { key, failures: 0, windowStart: now, lockedUntil: 0 };
+    loginAttempts.set(key, fresh);
+    return fresh;
+  }
+  if (bucket.lockedUntil && bucket.lockedUntil <= now) bucket.lockedUntil = 0;
+  if (now - bucket.windowStart > LOGIN_ATTEMPT_WINDOW_MS) {
+    bucket.failures = 0;
+    bucket.windowStart = now;
+  }
+  return bucket;
+}
+
+function isLoginLocked(username, ip) {
+  const bucket = getLoginBucket(username, ip);
+  return bucket.lockedUntil > Date.now();
+}
+
+function recordLoginFailure(username, ip) {
+  const bucket = getLoginBucket(username, ip);
+  bucket.failures += 1;
+  if (bucket.failures >= LOGIN_ATTEMPT_MAX) {
+    bucket.lockedUntil = Date.now() + LOGIN_LOCKOUT_MS;
+    bucket.failures = 0;
+    bucket.windowStart = Date.now();
+  }
+}
+
+function clearLoginFailures(username, ip) {
+  loginAttempts.delete(getLoginBucketKey(username, ip));
 }
 
 async function pgQuery(text, params) {
@@ -763,13 +904,28 @@ function getJsonDbDiagnostics(db) {
   };
 }
 
-function sendJson(res, status, payload) {
+function sendJson(res, status, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body)
+    'Content-Length': Buffer.byteLength(body),
+    ...extraHeaders
   });
   res.end(body);
+}
+
+function requireAdminSession(req, res, requestedOffice = '') {
+  const session = getAdminSession(req);
+  if (!session) {
+    sendJson(res, 401, { ok: false, message: 'Admin authentication required.' });
+    return null;
+  }
+  const officeScope = normalizeDivisionOfficeScope(requestedOffice);
+  if (session.office && officeScope && session.office !== officeScope) {
+    sendJson(res, 403, { ok: false, message: 'You do not have access to that office scope.' });
+    return null;
+  }
+  return session;
 }
 
 async function fetchWithTimeout(resource, options = {}, timeoutMs = EXTERNAL_FETCH_TIMEOUT_MS) {
@@ -3103,6 +3259,7 @@ async function upsertAttendancePg(record) {
 
 async function handleApiPg(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/db-health') {
+    if (!requireAdminSession(req, res)) return;
     const brevoConfig = getBrevoConfig();
     const [admins, employees, attendance, notifications, messages, reports] = await Promise.all([
       pgQuery('SELECT COUNT(*) AS count FROM admins'),
@@ -3144,6 +3301,7 @@ async function handleApiPg(req, res, pathname) {
   }
 
   if (req.method === 'POST' && pathname === '/api/dev/seed') {
+    if (!requireAdminSession(req, res)) return;
     if (!canSeed()) {
       return sendJson(res, 403, { ok: false, message: 'Seeding disabled. Set ALLOW_SEED=true in .env.' });
     }
@@ -3185,6 +3343,7 @@ async function handleApiPg(req, res, pathname) {
     const query = url.parse(req.url, true).query; 
     const date = String(query.date || isoToday()); 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!requireAdminSession(req, res, officeScope)) return;
     const totalRes = await pgQuery( 
       `SELECT COUNT(*) AS count 
        FROM employees 
@@ -3226,6 +3385,7 @@ async function handleApiPg(req, res, pathname) {
   if (req.method === 'GET' && pathname === '/api/employees') { 
     const query = url.parse(req.url, true).query; 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!requireAdminSession(req, res, officeScope)) return;
     const result = officeScope
       ? await pgQuery('SELECT * FROM employees WHERE office = $1 ORDER BY id', [officeScope])
       : await pgQuery('SELECT * FROM employees ORDER BY id'); 
@@ -3233,6 +3393,7 @@ async function handleApiPg(req, res, pathname) {
   } 
 
   if (req.method === 'GET' && pathname === '/api/notifications') {
+    if (!requireAdminSession(req, res)) return;
     const result = await pgQuery('SELECT * FROM notifications ORDER BY created_at DESC');
     const notifications = result.rows.map((row) => ({
       id: row.id,
@@ -3248,6 +3409,7 @@ async function handleApiPg(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/api/notifications/read') {
     const body = await collectBody(req);
+    if (!requireAdminSession(req, res)) return;
     if (body && body.all) {
       await pgQuery('UPDATE notifications SET read = true');
     } else if (Array.isArray(body.ids) && body.ids.length) {
@@ -3257,6 +3419,7 @@ async function handleApiPg(req, res, pathname) {
   }
 
   if (req.method === 'GET' && pathname === '/api/messages') {
+    if (!requireAdminSession(req, res)) return;
     const result = await pgQuery('SELECT * FROM messages ORDER BY created_at DESC');
     const messages = result.rows.map((row) => ({
       id: row.id,
@@ -3293,6 +3456,7 @@ async function handleApiPg(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/api/messages/read') {
     const body = await collectBody(req);
+    if (!requireAdminSession(req, res)) return;
     if (body && body.all) {
       await pgQuery('UPDATE messages SET read = true');
     } else if (Array.isArray(body.ids) && body.ids.length) {
@@ -3307,6 +3471,7 @@ async function handleApiPg(req, res, pathname) {
     const to = query.to || '2999-12-31'; 
     const employeeId = query.employeeId; 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!requireAdminSession(req, res, officeScope)) return;
     const params = [from, to]; 
     let sql = 
       `SELECT * FROM reports 
@@ -3364,6 +3529,7 @@ async function handleApiPg(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/api/reports/attested') {
     const body = await collectBody(req);
+    if (!requireAdminSession(req, res, body.office)) return;
     const hasReportId = Boolean(String(body.id || '').trim());
     const employeeId = String(body.employeeId || '').trim();
     const reportDate = String(body.reportDate || body.date || '').trim();
@@ -3379,6 +3545,7 @@ async function handleApiPg(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/api/employees') { 
     const body = await collectBody(req); 
+    if (!requireAdminSession(req, res, body.office)) return;
     const email = normalizeEmail(body.email || ''); 
     const countRes = await pgQuery('SELECT COUNT(*) AS count FROM employees'); 
     const nextId = body.id || `SDO-${String(Number(countRes.rows[0].count) + 1).padStart(4, '0')}`; 
@@ -3421,6 +3588,7 @@ async function handleApiPg(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/api/employees/update') { 
     const body = await collectBody(req); 
+    if (!requireAdminSession(req, res)) return;
     const employeeId = String(body.id || '').trim(); 
     const position = String(body.position || '').trim(); 
     if (!employeeId || !position) { 
@@ -3437,6 +3605,7 @@ async function handleApiPg(req, res, pathname) {
  
   if (req.method === 'POST' && pathname === '/api/employees/delete') { 
     const body = await collectBody(req); 
+    if (!requireAdminSession(req, res)) return;
     const employeeId = String(body.id || '').trim(); 
     if (!employeeId) { 
       return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
@@ -3452,6 +3621,7 @@ async function handleApiPg(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/api/employees/restore') {
     const body = await collectBody(req);
+    if (!requireAdminSession(req, res)) return;
     const employeeId = String(body.id || '').trim();
     if (!employeeId) {
       return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
@@ -3467,6 +3637,7 @@ async function handleApiPg(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/api/admin/register') {
     const body = await collectBody(req);
+    if (!requireAdminSession(req, res)) return;
     const name = String(body.name || '').trim();
     const username = String(body.username || '').trim();
     const password = String(body.password || '').trim();
@@ -3698,6 +3869,7 @@ async function handleApiPg(req, res, pathname) {
     }
 
     if (role === 'admin') {
+      if (!requireAdminSession(req, res)) return;
       const adminRes = await pgQuery('SELECT * FROM admins WHERE LOWER(username) = LOWER($1)', [username]);
       if (!adminRes.rows.length) return sendJson(res, 404, { ok: false, message: 'Admin not found.' });
       await pgQuery('UPDATE admins SET password = $1 WHERE id = $2', [newPassword, adminRes.rows[0].id]);
@@ -3718,15 +3890,27 @@ async function handleApiPg(req, res, pathname) {
     const body = await collectBody(req);
     const username = String(body.username || '').trim();
     const password = String(body.password || '').trim();
+    const clientIp = String(req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : '').trim();
     if (!username || !password) {
       return sendJson(res, 400, { ok: false, message: 'Missing credentials' });
+    }
+    if (isLoginLocked(username, clientIp)) {
+      return sendJson(res, 429, { ok: false, message: 'Too many failed login attempts. Please try again later.' });
     }
 
     const adminRes = await pgQuery('SELECT * FROM admins WHERE LOWER(username) = LOWER($1)', [username]);
     if (adminRes.rows.length) {
       const admin = mapAdminRow(adminRes.rows[0]);
       if (admin.password === password) {
-        return sendJson(res, 200, { ok: true, user: publicAdmin(adminRes.rows[0]), role: 'admin' });
+        clearLoginFailures(username, clientIp);
+        const sessionToken = createAdminSession(admin);
+        const session = adminSessions.get(sessionToken);
+        return sendJson(
+          res,
+          200,
+          { ok: true, user: publicAdmin(adminRes.rows[0]), role: 'admin' },
+          { 'Set-Cookie': buildAdminSessionCookie(sessionToken, session.expiresAt) }
+        );
       }
     }
 
@@ -3736,29 +3920,49 @@ async function handleApiPg(req, res, pathname) {
       [lookup]
     );
     if (!empRes.rows.length) {
+      recordLoginFailure(username, clientIp);
       return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
     }
     const emp = mapEmployeeRow(empRes.rows[0]);
     if (emp.password !== password) {
+      recordLoginFailure(username, clientIp);
       return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
     }
     if (String(emp.status || '').toLowerCase() === 'deleted') {
       return sendJson(res, 403, { ok: false, message: 'This employee account is deactivated. Contact admin.' });
     }
     if (emp.verified === false) {
+      clearLoginFailures(username, clientIp);
       return sendJson(res, 403, {
         ok: false,
         message: 'Email not verified. Please enter the OTP sent to your email.',
         identifier: emp.email || emp.username || emp.id || username
       });
     }
+    clearLoginFailures(username, clientIp);
     return sendJson(res, 200, { ok: true, user: publicEmployee(emp), role: 'employee' });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/logout') {
+    clearAdminSession(req);
+    return sendJson(res, 200, { ok: true }, { 'Set-Cookie': buildClearedAdminSessionCookie() });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/admin/session') {
+    const session = getAdminSession(req);
+    if (!session) return sendJson(res, 401, { ok: false, message: 'No active admin session.' });
+    return sendJson(res, 200, {
+      ok: true,
+      user: publicAdmin(session),
+      role: 'admin'
+    });
   }
 
   if (req.method === 'GET' && pathname === '/api/attendance/today') { 
     const query = url.parse(req.url, true).query; 
     const date = String(query.date || isoToday()); 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!requireAdminSession(req, res, officeScope)) return;
     const result = await pgQuery( 
       `SELECT a.*, e.name AS employee_name, e.office, e.position 
        FROM attendance a 
@@ -3785,6 +3989,9 @@ async function handleApiPg(req, res, pathname) {
     const to = query.to || '2999-12-31'; 
     const employeeId = query.employeeId; 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!employeeId || officeScope) {
+      if (!requireAdminSession(req, res, officeScope)) return;
+    }
     const params = [from, to]; 
     let sql = 
       `SELECT a.*, e.name AS employee_name, e.office, e.position 
@@ -4159,6 +4366,7 @@ async function handleApi(req, res, pathname) {
   }
 
   if (req.method === 'GET' && pathname === '/api/db-health') {
+    if (!requireAdminSession(req, res)) return;
     const db = readDb();
     const diag = getJsonDbDiagnostics(db);
     const brevoConfig = getBrevoConfig();
@@ -4199,6 +4407,7 @@ async function handleApi(req, res, pathname) {
   }
 
   if (req.method === 'POST' && pathname === '/api/dev/seed') {
+    if (!requireAdminSession(req, res)) return;
     if (!canSeed()) {
       return sendJson(res, 403, { ok: false, message: 'Seeding disabled. Set ALLOW_SEED=true in .env.' });
     }
@@ -4220,6 +4429,7 @@ async function handleApi(req, res, pathname) {
     const query = url.parse(req.url, true).query; 
     const date = String(query.date || isoToday()); 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!requireAdminSession(req, res, officeScope)) return;
     const summary = summaryForDate(db, date, officeScope); 
     return sendJson(res, 200, { date, ...summary }); 
   } 
@@ -4232,17 +4442,20 @@ async function handleApi(req, res, pathname) {
     const db = readDb(); 
     const query = url.parse(req.url, true).query; 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!requireAdminSession(req, res, officeScope)) return;
     const list = officeScope ? (db.employees || []).filter((e) => String(e.office || '') === officeScope) : (db.employees || []);
     return sendJson(res, 200, { employees: list.map((employee) => publicEmployee(employee)) }); 
   } 
 
   if (req.method === 'GET' && pathname === '/api/notifications') {
+    if (!requireAdminSession(req, res)) return;
     const db = readDb();
     return sendJson(res, 200, { notifications: db.notifications || [] });
   }
 
   if (req.method === 'POST' && pathname === '/api/notifications/read') {
     return collectBody(req).then((body) => {
+      if (!requireAdminSession(req, res)) return;
       const db = readDb();
       if (body && body.all) {
         db.notifications.forEach((n) => { n.read = true; });
@@ -4256,6 +4469,7 @@ async function handleApi(req, res, pathname) {
   }
 
   if (req.method === 'GET' && pathname === '/api/messages') {
+    if (!requireAdminSession(req, res)) return;
     const db = readDb();
     return sendJson(res, 200, { messages: db.messages || [] });
   }
@@ -4290,6 +4504,7 @@ async function handleApi(req, res, pathname) {
 
   if (req.method === 'POST' && pathname === '/api/messages/read') {
     return collectBody(req).then((body) => {
+      if (!requireAdminSession(req, res)) return;
       const db = readDb();
       if (body && body.all) {
         db.messages.forEach((m) => { m.read = true; });
@@ -4309,6 +4524,7 @@ async function handleApi(req, res, pathname) {
     const to = query.to || '2999-12-31'; 
     const employeeId = query.employeeId; 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!requireAdminSession(req, res, officeScope)) return;
     let list = db.reports || []; 
     list = list.filter((r) => r.reportDate >= from && r.reportDate <= to); 
     if (employeeId) list = list.filter((r) => r.employeeId === employeeId); 
@@ -4364,6 +4580,7 @@ async function handleApi(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/reports/attested') {
     return collectBody(req).then((body) => {
       const db = readDb();
+      if (!requireAdminSession(req, res, body.office)) return;
       const hasReportId = Boolean(String(body.id || '').trim());
       const employeeId = String(body.employeeId || '').trim();
       const reportDate = String(body.reportDate || body.date || '').trim();
@@ -4382,6 +4599,7 @@ async function handleApi(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/employees') {
     return collectBody(req).then((body) => {
       const db = readDb();
+      if (!requireAdminSession(req, res, body.office)) return;
       const email = normalizeEmail(body.email || '');
       const newEmp = {
         id: body.id || `SDO-${String(db.employees.length + 1).padStart(4, '0')}`,
@@ -4407,6 +4625,7 @@ async function handleApi(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/employees/update') { 
     return collectBody(req).then((body) => { 
       const db = readDb(); 
+      if (!requireAdminSession(req, res)) return;
       const employeeId = String(body.id || '').trim(); 
       const position = String(body.position || '').trim(); 
       if (!employeeId || !position) { 
@@ -4425,6 +4644,7 @@ async function handleApi(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/employees/delete') { 
     return collectBody(req).then((body) => { 
       const db = readDb(); 
+      if (!requireAdminSession(req, res)) return;
       const employeeId = String(body.id || '').trim(); 
       if (!employeeId) {
         return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
@@ -4442,6 +4662,7 @@ async function handleApi(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/employees/restore') {
     return collectBody(req).then((body) => {
       const db = readDb();
+      if (!requireAdminSession(req, res)) return;
       const employeeId = String(body.id || '').trim();
       if (!employeeId) {
         return sendJson(res, 400, { ok: false, message: 'Employee id is required.' });
@@ -4459,6 +4680,7 @@ async function handleApi(req, res, pathname) {
   if (req.method === 'POST' && pathname === '/api/admin/register') {
     return collectBody(req).then((body) => {
       const db = readDb();
+      if (!requireAdminSession(req, res)) return;
       const name = String(body.name || '').trim();
       const username = String(body.username || '').trim();
       const password = String(body.password || '').trim();
@@ -4661,6 +4883,7 @@ async function handleApi(req, res, pathname) {
       }
 
       if (role === 'admin') {
+        if (!requireAdminSession(req, res)) return;
         const admin = db.admins.find((a) => a.username.toLowerCase() === username.toLowerCase());
         if (!admin) return sendJson(res, 404, { ok: false, message: 'Admin not found.' });
         admin.password = newPassword;
@@ -4687,13 +4910,25 @@ async function handleApi(req, res, pathname) {
       const db = readDb();
       const username = String(body.username || '').trim();
       const password = String(body.password || '').trim();
+      const clientIp = String(req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : '').trim();
       if (!username || !password) {
         return sendJson(res, 400, { ok: false, message: 'Missing credentials' });
+      }
+      if (isLoginLocked(username, clientIp)) {
+        return sendJson(res, 429, { ok: false, message: 'Too many failed login attempts. Please try again later.' });
       }
 
       const admin = db.admins.find((a) => a.username.toLowerCase() === username.toLowerCase());
       if (admin && admin.password === password) {
-        return sendJson(res, 200, { ok: true, user: publicAdmin(admin), role: 'admin' });
+        clearLoginFailures(username, clientIp);
+        const sessionToken = createAdminSession(admin);
+        const session = adminSessions.get(sessionToken);
+        return sendJson(
+          res,
+          200,
+          { ok: true, user: publicAdmin(admin), role: 'admin' },
+          { 'Set-Cookie': buildAdminSessionCookie(sessionToken, session.expiresAt) }
+        );
       }
 
       const lookup = username.toLowerCase();
@@ -4704,19 +4939,38 @@ async function handleApi(req, res, pathname) {
         (e.name && e.name.toLowerCase() === lookup)
       );
       if (!emp || emp.password !== password) {
+        recordLoginFailure(username, clientIp);
         return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
       }
       if (String(emp.status || '').toLowerCase() === 'deleted') {
+        clearLoginFailures(username, clientIp);
         return sendJson(res, 403, { ok: false, message: 'This employee account is deactivated. Contact admin.' });
       }
       if (emp.verified === false) {
+        clearLoginFailures(username, clientIp);
         return sendJson(res, 403, {
           ok: false,
           message: 'Email not verified. Please enter the OTP sent to your email.',
           identifier: emp.email || emp.username || emp.id || username
         });
       }
+      clearLoginFailures(username, clientIp);
       return sendJson(res, 200, { ok: true, user: publicEmployee(emp), role: 'employee' });
+    });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/logout') {
+    clearAdminSession(req);
+    return sendJson(res, 200, { ok: true }, { 'Set-Cookie': buildClearedAdminSessionCookie() });
+  }
+
+  if (req.method === 'GET' && pathname === '/api/admin/session') {
+    const session = getAdminSession(req);
+    if (!session) return sendJson(res, 401, { ok: false, message: 'No active admin session.' });
+    return sendJson(res, 200, {
+      ok: true,
+      user: publicAdmin(session),
+      role: 'admin'
     });
   }
 
@@ -4725,6 +4979,7 @@ async function handleApi(req, res, pathname) {
     const query = url.parse(req.url, true).query; 
     const date = String(query.date || isoToday()); 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!requireAdminSession(req, res, officeScope)) return;
     let todays = enrichAttendance(db, attendanceForDate(db, date)); 
     if (officeScope) todays = todays.filter((att) => String(att.office || '') === officeScope);
     return sendJson(res, 200, { date, attendance: todays }); 
@@ -4737,6 +4992,9 @@ async function handleApi(req, res, pathname) {
     const to = query.to || '2999-12-31'; 
     const employeeId = query.employeeId; 
     const officeScope = normalizeDivisionOfficeScope(query.office);
+    if (!employeeId || officeScope) {
+      if (!requireAdminSession(req, res, officeScope)) return;
+    }
     let list = db.attendance.filter((a) => a.date >= from && a.date <= to); 
     if (employeeId) list = list.filter((a) => a.employeeId === employeeId); 
     let enriched = enrichAttendance(db, list); 

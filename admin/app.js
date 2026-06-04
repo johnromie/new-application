@@ -796,6 +796,7 @@ async function api(path, options = {}) {
       : path;
   const res = await fetch(cacheBustedPath, {
     cache: 'no-store',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     ...options
   });
@@ -813,6 +814,49 @@ async function api(path, options = {}) {
   }
   return data; 
 } 
+
+function updateAdminScope(user) {
+  currentAdmin = user || null;
+  officeScope = normalizeOfficeScope(currentAdmin && currentAdmin.office);
+  const reportOfficeSelect = document.getElementById('report-office');
+  if (reportOfficeSelect) {
+    reportOfficeSelect.value = officeScope || '';
+    reportOfficeSelect.disabled = !!officeScope;
+  }
+  if (reportsOfficeFilter) {
+    reportsOfficeFilter.value = officeScope || '';
+    reportsOfficeFilter.disabled = !!officeScope;
+  }
+  const addOfficeSelect = addEmployeeForm ? addEmployeeForm.querySelector('select[name="office"]') : null;
+  if (addOfficeSelect) {
+    addOfficeSelect.value = officeScope || '';
+    addOfficeSelect.disabled = !!officeScope;
+  }
+}
+
+async function enterAdminArea(user) {
+  updateAdminScope(user);
+  loginScreen.classList.add('hidden'); 
+  adminApp.classList.remove('hidden'); 
+  const monthRange = getMonthRange();
+  if (attendanceFromInput) attendanceFromInput.value = monthRange.from;
+  if (attendanceToInput) attendanceToInput.value = monthRange.to;
+  if (reportsFrom) reportsFrom.value = monthRange.from;
+  if (reportsTo) reportsTo.value = monthRange.to;
+  await Promise.all([
+    loadSummary(),
+    loadAttendanceToday(),
+    loadEmployees(),
+    loadNotifications(),
+    loadMessages(),
+    loadAttendanceHistory(monthRange.from, monthRange.to),
+    loadReportsTable(monthRange.from, monthRange.to)
+  ]);
+  const statRange = getMonthRange();
+  loadStatBase(statRange.from, statRange.to, false).catch(() => {});
+  tickClock();
+  startAutoRefresh();
+}
 
 function normalizeOfficeScope(value) {
   const raw = String(value || '').trim();
@@ -1390,8 +1434,28 @@ function togglePanel(panel) {
   if (panel && !isOpen) panel.classList.remove('hidden');
 }
 
-function logoutAdmin() {
+async function logoutAdmin() {
   closePanels();
+  try {
+    await fetch('/api/logout', {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (err) {
+    // Ignore logout transport failures; local state still gets cleared.
+  }
+  currentAdmin = null;
+  officeScope = '';
+  updateAdminScope(null);
+  employeesCache = [];
+  attendanceCache = [];
+  reportsCache = [];
+  notificationsCache = [];
+  messagesCache = [];
+  reportMap = new Map();
+  reportAttestedDrafts = new Map();
   loginScreen.classList.remove('hidden');
   adminApp.classList.add('hidden');
   loginForm.reset();
@@ -1574,6 +1638,10 @@ async function handleReportPrintClick(event) {
 }
 
 function openAdminRegister() {
+  if (!currentAdmin) {
+    alert('Please log in first to manage admin accounts.');
+    return;
+  }
   adminRegisterModal.classList.remove('hidden');
 }
 
@@ -1584,6 +1652,10 @@ function closeAdminRegister() {
 
 async function handleAdminRegister(event) {
   event.preventDefault();
+  if (!currentAdmin) {
+    alert('Please log in first to manage admin accounts.');
+    return;
+  }
   const formData = new FormData(adminRegisterForm);
   const payload = Object.fromEntries(formData.entries());
   try {
@@ -1599,6 +1671,10 @@ async function handleAdminRegister(event) {
 }
 
 function openAdminForgot() {
+  if (!currentAdmin) {
+    alert('Please log in first to change an admin password.');
+    return;
+  }
   adminForgotModal.classList.remove('hidden');
 }
 
@@ -1609,6 +1685,10 @@ function closeAdminForgot() {
 
 async function handleAdminForgot(event) {
   event.preventDefault();
+  if (!currentAdmin) {
+    alert('Please log in first to change an admin password.');
+    return;
+  }
   const formData = new FormData(adminForgotForm);
   const payload = Object.fromEntries(formData.entries());
   try {
@@ -1679,42 +1759,7 @@ loginForm.addEventListener('submit', async (event) => {
       method: 'POST', 
       body: JSON.stringify({ role: 'admin', username, password }) 
     }); 
-    currentAdmin = result && result.user ? result.user : null;
-    officeScope = normalizeOfficeScope(currentAdmin && currentAdmin.office);
-    const reportOfficeSelect = document.getElementById('report-office');
-    if (reportOfficeSelect && officeScope) {
-      reportOfficeSelect.value = officeScope;
-      reportOfficeSelect.disabled = true;
-    }
-    if (reportsOfficeFilter && officeScope) {
-      reportsOfficeFilter.value = officeScope;
-      reportsOfficeFilter.disabled = true;
-    }
-    const addOfficeSelect = addEmployeeForm ? addEmployeeForm.querySelector('select[name=\"office\"]') : null;
-    if (addOfficeSelect && officeScope) {
-      addOfficeSelect.value = officeScope;
-      addOfficeSelect.disabled = true;
-    }
-    loginScreen.classList.add('hidden'); 
-    adminApp.classList.remove('hidden'); 
-    const monthRange = getMonthRange();
-    if (attendanceFromInput) attendanceFromInput.value = monthRange.from;
-    if (attendanceToInput) attendanceToInput.value = monthRange.to;
-    if (reportsFrom) reportsFrom.value = monthRange.from;
-    if (reportsTo) reportsTo.value = monthRange.to;
-    await Promise.all([
-      loadSummary(),
-      loadAttendanceToday(),
-      loadEmployees(),
-      loadNotifications(),
-      loadMessages(),
-      loadAttendanceHistory(monthRange.from, monthRange.to),
-      loadReportsTable(monthRange.from, monthRange.to)
-    ]);
-    const statRange = getMonthRange();
-    loadStatBase(statRange.from, statRange.to, false).catch(() => {});
-    tickClock();
-    startAutoRefresh();
+    await enterAdminArea(result && result.user ? result.user : null);
   } catch (err) {
     if (err.name === 'TypeError') {
       alert('Cannot reach the server. Make sure the server is running and try again.');
@@ -1921,9 +1966,22 @@ if (helpBtn && helpDetails) {
 }
 
 if (logoutBtn) {
-  logoutBtn.addEventListener('click', logoutAdmin);
+  logoutBtn.addEventListener('click', () => {
+    logoutAdmin().catch(() => {});
+  });
 }
 
 document.addEventListener('click', closePanels);
 
 tickClock();
+
+(async () => {
+  try {
+    const session = await api('/api/admin/session');
+    if (session && session.user) {
+      await enterAdminArea(session.user);
+    }
+  } catch (err) {
+    // No active session is normal on first load.
+  }
+})();
