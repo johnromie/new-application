@@ -208,6 +208,76 @@ function parseJsonSafe(raw) {
   }
 }
 
+const PASSWORD_HASH_PREFIX = 'scrypt';
+const PASSWORD_HASH_KEYLEN = Math.max(32, Number(process.env.PASSWORD_HASH_KEYLEN || 64));
+
+function isPasswordHash(value) {
+  const raw = String(value || '').trim();
+  return raw.startsWith(`${PASSWORD_HASH_PREFIX}$`);
+}
+
+function hashPassword(password) {
+  const raw = String(password || '');
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(raw, salt, PASSWORD_HASH_KEYLEN);
+  return `${PASSWORD_HASH_PREFIX}$${salt}$${derived.toString('hex')}`;
+}
+
+function securePasswordValue(password) {
+  const raw = String(password || '').trim();
+  if (!raw) return '';
+  if (isPasswordHash(raw)) return raw;
+  return hashPassword(raw);
+}
+
+function verifyPassword(candidate, storedPassword) {
+  const rawStored = String(storedPassword || '').trim();
+  if (!rawStored) return false;
+  if (!isPasswordHash(rawStored)) {
+    return String(candidate || '') === rawStored;
+  }
+  const parts = rawStored.split('$');
+  if (parts.length !== 3) return false;
+  const salt = parts[1];
+  const expectedHex = parts[2];
+  if (!salt || !expectedHex) return false;
+  try {
+    const expected = Buffer.from(expectedHex, 'hex');
+    const derived = crypto.scryptSync(String(candidate || ''), salt, expected.length);
+    if (derived.length !== expected.length) return false;
+    return crypto.timingSafeEqual(derived, expected);
+  } catch (err) {
+    return false;
+  }
+}
+
+function migratePasswordsInDb(db) {
+  let changed = false;
+  for (const admin of db.admins || []) {
+    if (!admin || typeof admin !== 'object') continue;
+    const hashed = securePasswordValue(admin.password);
+    if (hashed && hashed !== admin.password) {
+      admin.password = hashed;
+      changed = true;
+    }
+  }
+  for (const employee of db.employees || []) {
+    if (!employee || typeof employee !== 'object') continue;
+    const hashed = securePasswordValue(employee.password);
+    if (hashed && hashed !== employee.password) {
+      employee.password = hashed;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function sanitizeEmployeeForStorage(employee) {
+  const safe = employee && typeof employee === 'object' ? employee : {};
+  if (safe.password) safe.password = securePasswordValue(safe.password);
+  return safe;
+}
+
 function parseCookies(req) {
   const header = String(req && req.headers && req.headers.cookie ? req.headers.cookie : '');
   const cookies = {};
@@ -476,8 +546,27 @@ async function ensureSchema() {
     const admin = DEFAULT_DB.admins[0];
     await pgQuery(
       'INSERT INTO admins (id, name, username, password, office) VALUES ($1, $2, $3, $4, $5)',
-      [admin.id, admin.name, admin.username, admin.password, admin.office]
+      [admin.id, admin.name, admin.username, securePasswordValue(admin.password), admin.office]
     );
+  }
+  await migratePgPasswords();
+}
+
+async function migratePgPasswords() {
+  if (!USE_PG) return;
+  const [adminRes, employeeRes] = await Promise.all([
+    pgQuery('SELECT id, password FROM admins'),
+    pgQuery('SELECT id, password FROM employees')
+  ]);
+
+  for (const row of adminRes.rows || []) {
+    if (!row || isPasswordHash(row.password)) continue;
+    await pgQuery('UPDATE admins SET password = $1 WHERE id = $2', [securePasswordValue(row.password), row.id]);
+  }
+
+  for (const row of employeeRes.rows || []) {
+    if (!row || isPasswordHash(row.password)) continue;
+    await pgQuery('UPDATE employees SET password = $1 WHERE id = $2', [securePasswordValue(row.password), row.id]);
   }
 }
 
@@ -619,6 +708,7 @@ function normalizeDb(db) {
     safe.admins = JSON.parse(JSON.stringify(DEFAULT_DB.admins));
   }
   migrateEmpIdsToSdo(safe);
+  migratePasswordsInDb(safe);
   return safe;
 }
 
@@ -2742,7 +2832,7 @@ function getSeedEmployees() {
       email: 'juan.delacruz@example.com',
       username: 'juan.delacruz@example.com',
       employeeType: 'Regular',
-      password: 'password123',
+      password: securePasswordValue('password123'),
       status: 'Active',
       avatar: 'assets/avatar-generic.svg',
       verified: true,
@@ -2757,7 +2847,7 @@ function getSeedEmployees() {
       email: 'joji.ama@example.com',
       username: 'joji.ama@example.com',
       employeeType: 'COS',
-      password: 'password123',
+      password: securePasswordValue('password123'),
       status: 'Active',
       avatar: 'assets/avatar-generic.svg',
       verified: true,
@@ -3557,7 +3647,7 @@ async function handleApiPg(req, res, pathname) {
       email,
       username: email || body.username || '',
       employeeType: body.employeeType || 'Regular',
-      password: body.password || 'password123',
+      password: securePasswordValue(body.password || 'password123'),
       status: 'Active',
       avatar: body.avatar || 'assets/avatar-generic.png',
       verified: true,
@@ -3657,7 +3747,7 @@ async function handleApiPg(req, res, pathname) {
       id: `ADM-${String(Number(countRes.rows[0].count) + 1).padStart(3, '0')}`,
       name,
       username,
-      password,
+      password: securePasswordValue(password),
       office
     };
     await pgQuery(
@@ -3698,7 +3788,7 @@ async function handleApiPg(req, res, pathname) {
       existing.position = position || existing.position;
       existing.email = email;
       existing.username = email;
-      existing.password = password;
+      existing.password = securePasswordValue(password);
       existing.verified = false;
       existing.otp = otp;
       existing.otpExpiresAt = Date.now() + 10 * 60 * 1000;
@@ -3750,7 +3840,7 @@ async function handleApiPg(req, res, pathname) {
       email,
       username: email,
       employeeType,
-      password,
+      password: securePasswordValue(password),
       status: 'Active',
       avatar: 'assets/avatar-generic.svg',
       verified: false,
@@ -3872,7 +3962,7 @@ async function handleApiPg(req, res, pathname) {
       if (!requireAdminSession(req, res)) return;
       const adminRes = await pgQuery('SELECT * FROM admins WHERE LOWER(username) = LOWER($1)', [username]);
       if (!adminRes.rows.length) return sendJson(res, 404, { ok: false, message: 'Admin not found.' });
-      await pgQuery('UPDATE admins SET password = $1 WHERE id = $2', [newPassword, adminRes.rows[0].id]);
+      await pgQuery('UPDATE admins SET password = $1 WHERE id = $2', [securePasswordValue(newPassword), adminRes.rows[0].id]);
       return sendJson(res, 200, { ok: true });
     }
 
@@ -3882,7 +3972,7 @@ async function handleApiPg(req, res, pathname) {
       [lookup]
     );
     if (!empRes.rows.length) return sendJson(res, 404, { ok: false, message: 'Employee not found.' });
-    await pgQuery('UPDATE employees SET password = $1 WHERE id = $2', [newPassword, empRes.rows[0].id]);
+    await pgQuery('UPDATE employees SET password = $1 WHERE id = $2', [securePasswordValue(newPassword), empRes.rows[0].id]);
     return sendJson(res, 200, { ok: true });
   }
 
@@ -3901,7 +3991,7 @@ async function handleApiPg(req, res, pathname) {
     const adminRes = await pgQuery('SELECT * FROM admins WHERE LOWER(username) = LOWER($1)', [username]);
     if (adminRes.rows.length) {
       const admin = mapAdminRow(adminRes.rows[0]);
-      if (admin.password === password) {
+      if (verifyPassword(password, admin.password)) {
         clearLoginFailures(username, clientIp);
         const sessionToken = createAdminSession(admin);
         const session = adminSessions.get(sessionToken);
@@ -3924,7 +4014,7 @@ async function handleApiPg(req, res, pathname) {
       return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
     }
     const emp = mapEmployeeRow(empRes.rows[0]);
-    if (emp.password !== password) {
+    if (!verifyPassword(password, emp.password)) {
       recordLoginFailure(username, clientIp);
       return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
     }
@@ -4609,7 +4699,7 @@ async function handleApi(req, res, pathname) {
         email,
         username: email || body.username || '',
         employeeType: body.employeeType || 'Regular',
-        password: body.password || 'password123',
+        password: securePasswordValue(body.password || 'password123'),
         status: 'Active',
         avatar: body.avatar || 'assets/avatar-generic.png',
         verified: true,
@@ -4699,7 +4789,7 @@ async function handleApi(req, res, pathname) {
         id: `ADM-${String(db.admins.length + 1).padStart(3, '0')}`,
         name,
         username,
-        password,
+        password: securePasswordValue(password),
         office
       };
       db.admins.push(newAdmin);
@@ -4738,7 +4828,7 @@ async function handleApi(req, res, pathname) {
         existing.position = position || existing.position;
         existing.email = email;
         existing.username = email;
-        existing.password = password;
+        existing.password = securePasswordValue(password);
         existing.verified = false;
         existing.otp = otp;
         existing.otpExpiresAt = Date.now() + 10 * 60 * 1000;
@@ -4772,7 +4862,7 @@ async function handleApi(req, res, pathname) {
         email,
         username: email,
         employeeType,
-        password,
+        password: securePasswordValue(password),
         status: 'Active',
         avatar: 'assets/avatar-generic.svg',
         verified: false,
@@ -4886,7 +4976,7 @@ async function handleApi(req, res, pathname) {
         if (!requireAdminSession(req, res)) return;
         const admin = db.admins.find((a) => a.username.toLowerCase() === username.toLowerCase());
         if (!admin) return sendJson(res, 404, { ok: false, message: 'Admin not found.' });
-        admin.password = newPassword;
+        admin.password = securePasswordValue(newPassword);
         writeDb(db);
         return sendJson(res, 200, { ok: true });
       }
@@ -4899,7 +4989,7 @@ async function handleApi(req, res, pathname) {
         (e.name && e.name.toLowerCase() === lookup)
       );
       if (!emp) return sendJson(res, 404, { ok: false, message: 'Employee not found.' });
-      emp.password = newPassword;
+      emp.password = securePasswordValue(newPassword);
       writeDb(db);
       return sendJson(res, 200, { ok: true });
     });
@@ -4919,7 +5009,7 @@ async function handleApi(req, res, pathname) {
       }
 
       const admin = db.admins.find((a) => a.username.toLowerCase() === username.toLowerCase());
-      if (admin && admin.password === password) {
+      if (verifyPassword(password, admin.password)) {
         clearLoginFailures(username, clientIp);
         const sessionToken = createAdminSession(admin);
         const session = adminSessions.get(sessionToken);
@@ -4938,7 +5028,7 @@ async function handleApi(req, res, pathname) {
         (e.id && e.id.toLowerCase() === lookup) ||
         (e.name && e.name.toLowerCase() === lookup)
       );
-      if (!emp || emp.password !== password) {
+      if (!emp || !verifyPassword(password, emp.password)) {
         recordLoginFailure(username, clientIp);
         return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
       }
