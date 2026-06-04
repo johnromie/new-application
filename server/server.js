@@ -375,8 +375,13 @@ function createAdminSession(admin) {
 
 function resolveAdminEmail(admin) {
   const source = admin && typeof admin === 'object' ? admin : {};
-  const email = normalizeEmail(source.email || source.username || DEFAULT_ADMIN_EMAIL);
-  return isEmailAddress(email) ? email : '';
+  const sourceEmail = normalizeEmail(source.email || '');
+  if (isEmailAddress(sourceEmail)) return sourceEmail;
+  const usernameEmail = normalizeEmail(source.username || '');
+  if (isEmailAddress(usernameEmail)) return usernameEmail;
+  const defaultEmail = normalizeEmail(DEFAULT_ADMIN_EMAIL);
+  if (isEmailAddress(defaultEmail)) return defaultEmail;
+  return '';
 }
 
 function createAdminLoginChallenge(admin, clientIp) {
