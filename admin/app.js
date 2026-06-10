@@ -1643,6 +1643,7 @@ async function handleReportPrintClick(event) {
 }
 
 function openAdminRegister() {
+  if (!adminRegisterModal) return;
   if (!currentAdmin) {
     alert('Please log in first to manage admin accounts.');
     return;
@@ -1651,6 +1652,7 @@ function openAdminRegister() {
 }
 
 function closeAdminRegister() {
+  if (!adminRegisterModal || !adminRegisterForm) return;
   adminRegisterModal.classList.add('hidden');
   adminRegisterForm.reset();
 }
@@ -1676,6 +1678,7 @@ async function handleAdminRegister(event) {
 }
 
 function openAdminForgot() {
+  if (!adminForgotModal) return;
   if (!currentAdmin) {
     alert('Please log in first to change an admin password.');
     return;
@@ -1684,6 +1687,7 @@ function openAdminForgot() {
 }
 
 function closeAdminForgot() {
+  if (!adminForgotModal || !adminForgotForm) return;
   adminForgotModal.classList.add('hidden');
   adminForgotForm.reset();
 }
@@ -1927,15 +1931,8 @@ if (refreshReportsBtn) {
 if (generateDtrBtn) generateDtrBtn.addEventListener('click', generateDtr);
 if (printDtrBtn) printDtrBtn.addEventListener('click', printDtr);
 
-document.getElementById('open-admin-register').addEventListener('click', openAdminRegister);
-document.getElementById('close-admin-register').addEventListener('click', closeAdminRegister);
-document.getElementById('cancel-admin-register').addEventListener('click', closeAdminRegister);
-adminRegisterForm.addEventListener('submit', handleAdminRegister);
-
-document.getElementById('open-admin-forgot').addEventListener('click', openAdminForgot);
-document.getElementById('close-admin-forgot').addEventListener('click', closeAdminForgot);
-document.getElementById('cancel-admin-forgot').addEventListener('click', closeAdminForgot);
-adminForgotForm.addEventListener('submit', handleAdminForgot);
+if (adminRegisterForm) adminRegisterForm.addEventListener('submit', handleAdminRegister);
+if (adminForgotForm) adminForgotForm.addEventListener('submit', handleAdminForgot);
 
 document.getElementById('close-admin-otp').addEventListener('click', closeAdminOtpModal);
 document.getElementById('cancel-admin-otp').addEventListener('click', closeAdminOtpModal);

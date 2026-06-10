@@ -33,8 +33,6 @@
             </div>
           </label>
           <button class="primary-btn" type="submit">LOGIN</button>
-          <button class="link-btn" type="button" id="open-admin-forgot">Forgot Password?</button>
-          <button class="link-btn" type="button" id="open-admin-register">Create Admin Account</button>
         </form>
         <p class="footer">© SDO Marinduque ICT Unit</p>
       </div>
@@ -378,82 +376,6 @@
         </div>
       </div>
     </section>
-
-    <div id="admin-register-modal" class="modal hidden">
-      <div class="modal-card">
-        <div class="card-header">
-          <h3>Create Admin Account</h3>
-          <button class="icon-btn" id="close-admin-register" aria-label="Close">&times;</button>
-        </div>
-        <form id="admin-register-form" class="form-grid two">
-          <label>
-            Full Name
-            <input type="text" name="name" required />
-          </label>
-          <label>
-            Office
-            <select name="office" required>
-              <option value="" disabled selected>Select Office</option>
-              <option value="Office of the SDS">Office of the SDS</option>
-              <option value="Office of the ASDS">Office of the ASDS</option>
-              <option value="Legal Unit">Legal Unit</option>
-              <option value="ICT Unit">ICT Unit</option>
-              <option value="Administrative Unit">Administrative Unit</option>
-              <option value="Personnel Section">Personnel Section</option>
-              <option value="Supply Section">Supply Section</option>
-              <option value="Cash Section">Cash Section</option>
-              <option value="Records Section">Records Section</option>
-              <option value="Procurement Section">Procurement Section</option>
-              <option value="Curriculum Implementation Division">Curriculum Implementation Division</option>
-              <option value="School Governance and Operations Division">School Governance and Operations Division</option>
-              <optgroup label="Finance Unit">
-                <option value="Accounting Section">Accounting Section</option>
-                <option value="Budget Section">Budget Section</option>
-              </optgroup>
-            </select>
-          </label>
-          <label>
-            Email
-            <input type="email" name="email" placeholder="Enter email" required />
-          </label>
-          <label>
-            Username
-            <input type="text" name="username" required />
-          </label>
-          <label>
-            Password
-            <input type="text" name="password" required />
-          </label>
-          <div class="modal-actions">
-            <button class="primary-btn" type="submit">Register</button>
-            <button class="ghost-btn" type="button" id="cancel-admin-register">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <div id="admin-forgot-modal" class="modal hidden">
-      <div class="modal-card">
-        <div class="card-header">
-          <h3>Reset Admin Password</h3>
-          <button class="icon-btn" id="close-admin-forgot" aria-label="Close">&times;</button>
-        </div>
-        <form id="admin-forgot-form" class="form-grid two">
-          <label>
-            Username
-            <input type="text" name="username" required />
-          </label>
-          <label>
-            New Password
-            <input type="text" name="newPassword" required />
-          </label>
-          <div class="modal-actions">
-            <button class="primary-btn" type="submit">Update</button>
-            <button class="ghost-btn" type="button" id="cancel-admin-forgot">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
 
     <div id="admin-otp-modal" class="modal hidden">
       <div class="modal-card">

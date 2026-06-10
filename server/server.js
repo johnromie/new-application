@@ -142,6 +142,7 @@ const LOCAL_BARANGAY_EDGE_OVERRIDE_DISTANCE_METERS = Math.max(
   Number(process.env.LOCAL_BARANGAY_EDGE_OVERRIDE_DISTANCE_METERS || 500)
 );
 
+const DEFAULT_ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'sdo.marinduque.admin').trim();
 const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'M@rinduque!2026#Admin');
 const DEFAULT_ADMIN_EMAIL = normalizeEmail(process.env.ADMIN_EMAIL || process.env.BREVO_FROM || 'sdo.marinduque001@gmail.com');
 
@@ -150,7 +151,7 @@ const DEFAULT_DB = {
     {
       id: 'ADM-001',
       name: 'SDO Admin',
-      username: 'admin',
+      username: DEFAULT_ADMIN_USERNAME,
       password: DEFAULT_ADMIN_PASSWORD,
       email: DEFAULT_ADMIN_EMAIL,
       office: 'ICT Unit'
@@ -291,6 +292,23 @@ function migrateAdminEmailsInDb(db) {
   return changed;
 }
 
+function migrateAdminUsernameInDb(db, username) {
+  const desiredUsername = String(username || '').trim();
+  if (!desiredUsername) return false;
+  let changed = false;
+  for (const admin of db.admins || []) {
+    if (!admin || typeof admin !== 'object') continue;
+    const currentUsername = String(admin.username || '').trim();
+    const isPrimaryAdmin = String(admin.id || '') === 'ADM-001' || currentUsername.toLowerCase() === 'admin' || currentUsername.toLowerCase() === desiredUsername.toLowerCase();
+    if (!isPrimaryAdmin) continue;
+    if (currentUsername !== desiredUsername) {
+      admin.username = desiredUsername;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function syncAdminPasswordInDb(db, password) {
   const desiredPassword = securePasswordValue(password);
   if (!desiredPassword) return false;
@@ -298,7 +316,10 @@ function syncAdminPasswordInDb(db, password) {
   for (const admin of db.admins || []) {
     if (!admin || typeof admin !== 'object') continue;
     const username = String(admin.username || '').toLowerCase();
-    const isPrimaryAdmin = username === 'admin' || String(admin.id || '') === 'ADM-001';
+    const isPrimaryAdmin =
+      username === String(DEFAULT_ADMIN_USERNAME || '').toLowerCase() ||
+      username === 'admin' ||
+      String(admin.id || '') === 'ADM-001';
     if (!isPrimaryAdmin) continue;
     if (admin.password !== desiredPassword) {
       admin.password = desiredPassword;
@@ -647,6 +668,7 @@ async function ensureSchema() {
       [admin.id, admin.name, admin.username, securePasswordValue(admin.password), resolveAdminEmail(admin), admin.office]
     );
   }
+  await migratePgAdminUsername(DEFAULT_ADMIN_USERNAME);
   await migratePgPasswords();
   await migratePgAdminEmails();
 }
@@ -680,6 +702,16 @@ async function migratePgAdminEmails() {
     if (currentEmail === desiredEmail) continue;
     await pgQuery('UPDATE admins SET email = $1 WHERE id = $2', [desiredEmail, row.id]);
   }
+}
+
+async function migratePgAdminUsername(username) {
+  if (!USE_PG) return;
+  const desiredUsername = String(username || '').trim();
+  if (!desiredUsername) return;
+  await pgQuery(
+    'UPDATE admins SET username = $1 WHERE id = $2 OR LOWER(username) = $3',
+    [desiredUsername, 'ADM-001', 'admin']
+  );
 }
 
 async function syncPgAdminPassword(password) {
@@ -831,6 +863,7 @@ function normalizeDb(db) {
     safe.admins = JSON.parse(JSON.stringify(DEFAULT_DB.admins));
   }
   migrateEmpIdsToSdo(safe);
+  migrateAdminUsernameInDb(safe, DEFAULT_ADMIN_USERNAME);
   migratePasswordsInDb(safe);
   migrateAdminEmailsInDb(safe);
   return safe;
@@ -5753,9 +5786,13 @@ const PORT = process.env.PORT || 5173;
   }
   try {
     if (USE_PG) {
+      await migratePgAdminUsername(DEFAULT_ADMIN_USERNAME);
       await syncPgAdminPassword(DEFAULT_ADMIN_PASSWORD);
     } else {
       const db = readDb();
+      if (migrateAdminUsernameInDb(db, DEFAULT_ADMIN_USERNAME)) {
+        writeDb(db);
+      }
       if (syncAdminPasswordInDb(db, DEFAULT_ADMIN_PASSWORD)) {
         writeDb(db);
       }
