@@ -103,7 +103,7 @@ Use this setup so both web (`/admin`, `/employee`) and API (`/api/*`) run in one
    - `DB_MODE=json`
    - `DB_PATH=../persistent-data/db.json`
    - `DB_MIRROR_PATH=../persistent-data/db-mirror.json`
-   - `ADMIN_USERNAME=SDO.Marinduque.Admin#2026`
+   - `ADMIN_USERNAME=A26$WorkFromHome!Mduque`
    - `ALLOW_SEED=false`
    - `BREVO_API_KEY=<your-brevo-api-key>`
    - `BREVO_FROM=<verified-sender@yourdomain.com>`
@@ -121,7 +121,7 @@ Use this setup so both web (`/admin`, `/employee`) and API (`/api/*`) run in one
 Important:
 - Use `../persistent-data/...` (with `../`), not `./persistent-data/...`.
 - `./persistent-data` can point inside deploy files and may be reset on redeploy.
-- Admin login username is now `SDO.Marinduque.Admin#2026`.
+- Admin login username is now `A26$WorkFromHome!Mduque`.
 - Admin login now sends a one-time code to `ADMIN_EMAIL` on every successful password check.
 - For higher concurrency (many simultaneous users), prefer `DB_MODE=postgres` with a managed PostgreSQL database.
 

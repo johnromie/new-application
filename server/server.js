@@ -142,7 +142,7 @@ const LOCAL_BARANGAY_EDGE_OVERRIDE_DISTANCE_METERS = Math.max(
   Number(process.env.LOCAL_BARANGAY_EDGE_OVERRIDE_DISTANCE_METERS || 500)
 );
 
-const DEFAULT_ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'SDO.Marinduque.Admin#2026').trim();
+const DEFAULT_ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'A26$WorkFromHome!Mduque').trim();
 const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'M@rinduque!2026#Admin');
 const DEFAULT_ADMIN_EMAIL = normalizeEmail(process.env.ADMIN_EMAIL || process.env.BREVO_FROM || 'sdo.marinduque001@gmail.com');
 
