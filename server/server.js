@@ -142,8 +142,8 @@ const LOCAL_BARANGAY_EDGE_OVERRIDE_DISTANCE_METERS = Math.max(
   Number(process.env.LOCAL_BARANGAY_EDGE_OVERRIDE_DISTANCE_METERS || 500)
 );
 
-const DEFAULT_ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'A26$WorkFromHome!Mduque').trim();
-const DEFAULT_ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || 'M@rinduque!2026#Admin');
+const DEFAULT_ADMIN_USERNAME = 'A26$WorkFromHome!Mduque';
+const DEFAULT_ADMIN_PASSWORD = 'M@rinduque!2026#Admin';
 const DEFAULT_ADMIN_EMAIL = normalizeEmail(process.env.ADMIN_EMAIL || process.env.BREVO_FROM || 'sdo.marinduque001@gmail.com');
 
 const DEFAULT_DB = {
@@ -299,7 +299,7 @@ function migrateAdminUsernameInDb(db, username) {
   for (const admin of db.admins || []) {
     if (!admin || typeof admin !== 'object') continue;
     const currentUsername = String(admin.username || '').trim();
-    const isPrimaryAdmin = String(admin.id || '') === 'ADM-001' || currentUsername.toLowerCase() === 'admin' || currentUsername.toLowerCase() === desiredUsername.toLowerCase();
+    const isPrimaryAdmin = String(admin.id || '') === 'ADM-001' || currentUsername.toLowerCase() === desiredUsername.toLowerCase();
     if (!isPrimaryAdmin) continue;
     if (currentUsername !== desiredUsername) {
       admin.username = desiredUsername;
@@ -318,7 +318,6 @@ function syncAdminPasswordInDb(db, password) {
     const username = String(admin.username || '').toLowerCase();
     const isPrimaryAdmin =
       username === String(DEFAULT_ADMIN_USERNAME || '').toLowerCase() ||
-      username === 'admin' ||
       String(admin.id || '') === 'ADM-001';
     if (!isPrimaryAdmin) continue;
     if (admin.password !== desiredPassword) {
@@ -428,6 +427,14 @@ function createAdminLoginChallenge(admin, clientIp) {
   };
   pendingAdminLogins.set(token, challenge);
   return { ok: true, challenge };
+}
+
+function isPrimaryAdminUsername(username) {
+  return String(username || '').trim().toLowerCase() === String(DEFAULT_ADMIN_USERNAME || '').trim().toLowerCase();
+}
+
+function findPrimaryAdminInJson(db) {
+  return (db.admins || []).find((admin) => admin && String(admin.id || '') === 'ADM-001' && isPrimaryAdminUsername(admin.username));
 }
 
 function getPendingAdminLogin(token) {
@@ -4178,7 +4185,10 @@ async function handleApiPg(req, res, pathname) {
 
     if (role === 'admin') {
       if (!requireAdminSession(req, res)) return;
-      const adminRes = await pgQuery('SELECT * FROM admins WHERE LOWER(username) = LOWER($1)', [username]);
+      const adminRes = await pgQuery(
+        'SELECT * FROM admins WHERE id = $1 AND LOWER(username) = LOWER($2)',
+        ['ADM-001', DEFAULT_ADMIN_USERNAME]
+      );
       if (!adminRes.rows.length) return sendJson(res, 404, { ok: false, message: 'Admin not found.' });
       await pgQuery('UPDATE admins SET password = $1 WHERE id = $2', [securePasswordValue(newPassword), adminRes.rows[0].id]);
       return sendJson(res, 200, { ok: true });
@@ -4206,7 +4216,12 @@ async function handleApiPg(req, res, pathname) {
       return sendJson(res, 429, { ok: false, message: 'Too many failed login attempts. Please try again later.' });
     }
 
-    const adminRes = await pgQuery('SELECT * FROM admins WHERE LOWER(username) = LOWER($1)', [username]);
+    if (!isPrimaryAdminUsername(username)) {
+      recordLoginFailure(username, clientIp);
+      return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
+    }
+
+    const adminRes = await pgQuery('SELECT * FROM admins WHERE id = $1 AND LOWER(username) = LOWER($2)', ['ADM-001', DEFAULT_ADMIN_USERNAME]);
     if (adminRes.rows.length) {
       const admin = mapAdminRow(adminRes.rows[0]);
       if (verifyPassword(password, admin.password)) {
@@ -4240,6 +4255,8 @@ async function handleApiPg(req, res, pathname) {
         });
       }
     }
+    recordLoginFailure(username, clientIp);
+    return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
 
     const lookup = username.toLowerCase();
     const empRes = await pgQuery(
@@ -5254,13 +5271,15 @@ async function handleApi(req, res, pathname) {
         return sendJson(res, 400, { ok: false, message: 'All fields are required.' });
       }
 
-      if (role === 'admin') {
-        if (!requireAdminSession(req, res)) return;
-        const admin = db.admins.find((a) => a.username.toLowerCase() === username.toLowerCase());
-        if (!admin) return sendJson(res, 404, { ok: false, message: 'Admin not found.' });
-        admin.password = securePasswordValue(newPassword);
-        writeDb(db);
-        return sendJson(res, 200, { ok: true });
+    if (role === 'admin') {
+      if (!requireAdminSession(req, res)) return;
+      const admin = db.admins.find(
+        (a) => String(a.id || '') === 'ADM-001' && String(a.username || '').toLowerCase() === String(DEFAULT_ADMIN_USERNAME || '').toLowerCase()
+      );
+      if (!admin) return sendJson(res, 404, { ok: false, message: 'Admin not found.' });
+      admin.password = securePasswordValue(newPassword);
+      writeDb(db);
+      return sendJson(res, 200, { ok: true });
       }
 
       const lookup = username.toLowerCase();
@@ -5290,8 +5309,13 @@ async function handleApi(req, res, pathname) {
         return sendJson(res, 429, { ok: false, message: 'Too many failed login attempts. Please try again later.' });
       }
 
-      const admin = db.admins.find((a) => a.username.toLowerCase() === username.toLowerCase());
-      if (verifyPassword(password, admin.password)) {
+      if (!isPrimaryAdminUsername(username)) {
+        recordLoginFailure(username, clientIp);
+        return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
+      }
+
+      const admin = findPrimaryAdminInJson(db);
+      if (admin && verifyPassword(password, admin.password)) {
         clearLoginFailures(username, clientIp);
         const challenge = createAdminLoginChallenge(admin, clientIp);
         if (!challenge.ok) {
@@ -5321,6 +5345,8 @@ async function handleApi(req, res, pathname) {
           });
         });
       }
+      recordLoginFailure(username, clientIp);
+      return sendJson(res, 401, { ok: false, message: 'Invalid credentials' });
 
       const lookup = username.toLowerCase();
       const emp = db.employees.find((e) =>

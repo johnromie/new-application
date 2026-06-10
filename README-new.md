@@ -103,7 +103,6 @@ Use this setup so both web (`/admin`, `/employee`) and API (`/api/*`) run in one
    - `DB_MODE=json`
    - `DB_PATH=../persistent-data/db.json`
    - `DB_MIRROR_PATH=../persistent-data/db-mirror.json`
-   - `ADMIN_USERNAME=A26$WorkFromHome!Mduque`
    - `ADMIN_EMAIL=<admin-email-that-receives-login-otp>`
    - `ALLOW_SEED=false`
 5. Ensure Node version is `18+`.
